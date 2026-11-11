@@ -1,0 +1,7 @@
+# The uploaded project pins Transformers 5.22.2 (Python 3.11+).
+# On CUDA machines, install the appropriate CUDA-capable PyTorch wheel FIRST:
+# https://pytorch.org/get-started/locally/
+torch>=2.6
+tqdm>=4.66
+transformers==5.22.2
+safetensors>=0.4
