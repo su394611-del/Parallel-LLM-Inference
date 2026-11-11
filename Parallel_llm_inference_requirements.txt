@@ -1,19 +1,11 @@
-""Parallel LLM data processing across several GPUs.
+# Python 3.10+; install CUDA-capable PyTorch using the appropriate wheel.
+# For an existing CUDA installation, ensure pip does not silently replace it.
+torch>=2.6
+tqdm>=4.66
+transformers==5.22.2
+safetensors>=0.4
 
-Pattern: one copy of the model per GPU, one worker process per copy, and one
-shared queue of batches. Whichever GPU is free pulls the next batch, so a
-faster card automatically does more of the work.
-
-    parent process                           worker process (one per GPU)
-    --------------                           ----------------------------
-    read rows, sort by length, cut           load its own copy of the model
-    into batches, put them on a queue  --->  pull a batch, run generate()
-    collect answers, restore the       <---  send (row ids, answers) back
-    original order, write JSONL
-
-Examples:
-    python parallel_llm_inference.py                    # every visible GPU, built-in demo data
-    python parallel_llm_inference.py --devices cuda:0   # one GPU only, to measure the speed-up
-    python parallel_llm_inference.py --input reviews.jsonl --text-field review --output out.jsonl
-
-Requires: Python 3.10+, torch, transformers>=4.56, accelerate
+# To edit/run the supplied Jupyter notebook locally:
+notebook>=7.2
+ipykernel>=6.29
+nbformat>=5.10
