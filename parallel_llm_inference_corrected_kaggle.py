@@ -1,403 +1,672 @@
-"""Parallel LLM sentiment inference: one model replica and worker per GPU.
-
-The input must be JSONL (one JSON object per line) with a nonempty text field,
-which defaults to 'review'. Optional 'label' allows sentiment evaluation.
-
-Examples (run as a .py SCRIPT, not directly in an ipykernel cell):
-
-  # Fast offline multiprocessing check; NO model download or GPU required
-  python parallel_llm_inference_corrected.py --mock --devices cpu cpu \
-      --input reviews.jsonl --output results_mock.jsonl
-
-  # On a single NVIDIA GPU (use a small batch on 4 GB VRAM)
-  python parallel_llm_inference_corrected.py --devices cuda:0 \
-      --input reviews.jsonl --output results_gpu.jsonl --batch-size 1
-
-  # On a computer with two visible NVIDIA GPUs
-  python parallel_llm_inference_corrected.py --devices cuda:0 cuda:1 \
-      --input reviews.jsonl --output results_2gpu.jsonl --batch-size 2
-
-This is independent-batch INFERENCE. It does not train or split one model
-across multiple GPUs. Each GPU must have enough memory for a full model copy.
-"""
-
-from __future__ import annotations
-
-import argparse
-import json
-import multiprocessing as mp
-import os
-from pathlib import Path
-import queue
-import random
-import re
-import signal
-import time
-import traceback
-import threading
-from typing import Any
-
-import torch
-from tqdm.auto import tqdm
-
-
-POSITIVE_PHRASES = [
-    "excellent", "fantastic", "amazing", "great", "wonderful", "reliable",
-    "impressive", "love", "perfect", "smooth", "recommended", "satisfied",
-]
-NEGATIVE_PHRASES = [
-    "terrible", "awful", "broken", "disappointed", "poor", "faulty",
-    "unreliable", "hate", "worst", "stopped working", "failed", "frustrating",
-]
-
-
-def build_messages(text: str) -> list[dict[str, str]]:
-    return [{
-        "role": "user",
-        "content": (
-            "Classify this product review as positive or negative. "
-            "Reply with exactly one word: positive or negative.\n\n"
-            f"Review: {text}"
-        ),
-    }]
-
-
-def make_demo_rows(n: int, seed: int = 2026) -> list[dict[str, Any]]:
-    """Optional generated sample data when --input is omitted."""
-    rng = random.Random(seed)
-    components = ["battery", "display", "keyboard", "microphone", "touchpad", "fan", "speaker"]
-    pos = ["is excellent", "works perfectly", "is reliable", "is impressive", "feels great"]
-    neg = ["is terrible", "stopped working", "is unreliable", "is broken", "is disappointing"]
-    rows = []
-    for i in range(n):
-        label = "positive" if i % 2 == 0 else "negative"
-        phrases = pos if label == "positive" else neg
-        count = rng.randint(1, 4)
-        text = " ".join(f"The {component} {rng.choice(phrases)}." for component in rng.sample(components, count))
-        rows.append({"id": i + 1, "review": text, "label": label})
-    return rows
-
-
-def read_jsonl(path: Path, text_field: str, max_chars: int | None) -> tuple[list[dict], list[str]]:
-    if not path.is_file():
-        raise FileNotFoundError(f"Input JSONL file does not exist: {path}")
-    rows: list[dict] = []
-    texts: list[str] = []
-    with path.open("r", encoding="utf-8-sig") as handle:
-        for lineno, line in enumerate(handle, 1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSON on line {lineno} of {path}: {exc}") from exc
-            if not isinstance(row, dict):
-                raise ValueError(f"Line {lineno} must be a JSON object, not {type(row).__name__}")
-            if text_field not in row:
-                raise ValueError(
-                    f"Line {lineno} is missing '{text_field}'. "
-                    f"Use --text-field to select the review field; found {sorted(row)}"
-                )
-            text = row[text_field]
-            if not isinstance(text, str) or not text.strip():
-                raise ValueError(f"Line {lineno}: '{text_field}' must be a nonempty string")
-            rows.append(row)
-            texts.append(text[:max_chars] if max_chars is not None else text)
-    if not rows:
-        raise ValueError(f"Input JSONL file contains no valid records: {path}")
-    return rows, texts
-
-
-def normalized_label(answer: str) -> str | None:
-    """Accept one-word labels, optionally followed by punctuation; reject explanations."""
-    match = re.fullmatch(r"\s*(positive|negative)\s*[.!]?\s*", answer, re.IGNORECASE)
-    return match.group(1).lower() if match else None
-
-
-def mock_generate(texts: list[str]) -> tuple[list[str], int]:
-    """Deterministic HEURISTIC ONLY: tests queueing and output, NOT LLM quality."""
-    results = []
-    for text in texts:
-        lower = text.lower()
-        neg = any(phrase in lower for phrase in NEGATIVE_PHRASES)
-        pos = any(phrase in lower for phrase in POSITIVE_PHRASES)
-        results.append("negative" if neg and not pos else "positive" if pos and not neg else "negative")
-    return results, len(results)
-
-
-def load_model(model_id: str, device: str, dtype: str | None):
-    try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-    except ImportError as exc:
-        raise RuntimeError("Install Transformers: python -m pip install transformers==5.22.2") from exc
-
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    tokenizer.padding_side = "left"  # decoder-only models generate after the final token
-    if tokenizer.pad_token_id is None:
-        if tokenizer.eos_token_id is None:
-            raise RuntimeError("Tokenizer has no EOS/padding token")
-        tokenizer.pad_token = tokenizer.eos_token
-
-    chosen_dtype = dtype or ("float16" if device.startswith("cuda") else "float32")
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, dtype=getattr(torch, chosen_dtype)
-    )
-    # Each worker explicitly owns exactly one device; no accelerate/device_map needed.
-    model = model.to(torch.device(device)).eval()
-    model.generation_config.pad_token_id = tokenizer.pad_token_id
-    return tokenizer, model
-
-
-@torch.inference_mode()
-def generate_batch(model, tokenizer, texts: list[str], max_new_tokens: int, max_input_tokens: int):
-    encoded = tokenizer.apply_chat_template(
-        [build_messages(t) for t in texts],
-        tokenize=True,
-        add_generation_prompt=True,
-        padding=True,
-        truncation=True,
-        max_length=max_input_tokens,
-        return_tensors="pt",
-        return_dict=True,
-    ).to(model.device)
-    output = model.generate(
-        **encoded,
-        do_sample=False,
-        max_new_tokens=max_new_tokens,
-        pad_token_id=tokenizer.pad_token_id,
-    )
-    generated = output[:, encoded["input_ids"].shape[1]:]
-    answers = [answer.strip() for answer in tokenizer.batch_decode(generated, skip_special_tokens=True)]
-    # Approximate generated tokens, including any first EOS but excluding subsequent pad tokens.
-    eos_ids = model.generation_config.eos_token_id
-    eos_ids = {eos_ids} if isinstance(eos_ids, int) else set(eos_ids or [])
-    counts = 0
-    for seq in generated.tolist():
-        for token_id in seq:
-            counts += 1
-            if token_id in eos_ids:
-                break
-    return answers, counts
-
-
-def worker(worker_id, device, args, threads, load_lock, task_queue, result_queue, go_event):
-    """Top-level function is picklable under Windows multiprocessing spawn."""
-    try:
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-        if device == "cpu":
-            torch.set_num_threads(threads)
-        else:
-            torch.cuda.set_device(int(device.split(":", 1)[1]))
-
-        if args.mock:
-            model = tokenizer = None
-        else:
-            with load_lock:  # avoid concurrent weight downloads and RAM spikes
-                tokenizer, model = load_model(args.model, device, args.dtype)
-
-        name = torch.cuda.get_device_name(device) if device.startswith("cuda") else "CPU"
-        result_queue.put(("ready", worker_id, f"{device}: {name}"))
-        go_event.wait()
-        while True:
-            item = task_queue.get()
-            if item is None:
-                break
-            ids, texts = item
-            if args.mock:
-                outputs, token_count = mock_generate(texts)
-            else:
-                outputs, token_count = generate_batch(
-                    model, tokenizer, texts, args.max_new_tokens, args.max_input_tokens
-                )
-            result_queue.put(("batch", worker_id, (ids, outputs, token_count)))
-        result_queue.put(("finished", worker_id, None))
-    except BaseException:
-        result_queue.put(("error", worker_id, traceback.format_exc()))
-
-
-def receive(queue_, procs, timeout_seconds: int):
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        try:
-            kind, wid, payload = queue_.get(timeout=0.5)
-        except queue.Empty:
-            for proc in procs:
-                if proc.exitcode is not None and proc.exitcode != 0:
-                    raise RuntimeError(f"{proc.name} crashed with exit code {proc.exitcode}")
-            if all(proc.exitcode is not None for proc in procs):
-                raise RuntimeError("Workers exited before all results arrived; inspect worker errors")
-            continue
-        if kind == "error":
-            raise RuntimeError(f"Worker {wid} failed:\n{payload}")
-        return kind, wid, payload
-    raise TimeoutError(f"No worker response within {timeout_seconds} seconds")
-
-
-def checked_devices(requested: list[str] | None, mock: bool, dtype: str | None):
-    count = torch.cuda.device_count()
-    devices = requested or ([f"cuda:{i}" for i in range(count)] if count else ["cpu"])
-    if len(devices) != len(set(devices)) and any(d.startswith("cuda:") for d in devices):
-        raise ValueError("Duplicate CUDA devices are disabled: a second model replica can exhaust VRAM")
-    for device in devices:
-        if device == "cpu":
-            if dtype in {"float16", "bfloat16"} and not mock:
-                raise ValueError("Use float32 for CPU inference")
-            continue
-        if not re.fullmatch(r"cuda:\d+", device):
-            raise ValueError(f"Invalid device '{device}'; expected 'cpu' or 'cuda:0', 'cuda:1', ...")
-        idx = int(device.partition(":")[2])
-        if idx >= count:
-            raise ValueError(
-                f"Requested {device}, but PyTorch detects {count} CUDA GPU(s). "
-                "Check torch.cuda.is_available() and your PyTorch CUDA build."
-            )
-        if dtype == "bfloat16" and torch.cuda.get_device_capability(idx)[0] < 8:
-            raise ValueError(f"{device} does not support efficient bfloat16; use float16")
-    return devices
-
-
-def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
-    parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
-    parser.add_argument("--devices", nargs="+", help="e.g. cuda:0 cuda:1 or cpu cpu for mock tests")
-    parser.add_argument("--input", type=Path, help="UTF-8 JSONL input")
-    parser.add_argument("--text-field", default="review", help="JSON field containing text (default: review)")
-    parser.add_argument("--output", type=Path, default=Path("results.jsonl"))
-    parser.add_argument("--num-samples", type=int, default=40, help="demo records when --input is omitted")
-    parser.add_argument("--batch-size", type=int, default=2, help="examples per generate call")
-    parser.add_argument("--max-new-tokens", type=int, default=8)
-    parser.add_argument("--max-input-tokens", type=int, default=256)
-    parser.add_argument("--max-chars", type=int, default=1200)
-    parser.add_argument("--dtype", choices=["float16", "bfloat16", "float32"])
-    parser.add_argument("--worker-timeout", type=int, default=900, help="timeout per worker response")
-    parser.add_argument("--mock", action="store_true", help="offline heuristic backend: test multiprocessing only")
-    args = parser.parse_args(argv)
-    for key in ("batch_size", "max_new_tokens", "max_input_tokens", "worker_timeout"):
-        if getattr(args, key) <= 0:
-            parser.error(f"--{key.replace('_', '-')} must be positive")
-    if args.max_chars is not None and args.max_chars <= 0:
-        parser.error("--max-chars must be positive")
-    if args.num_samples <= 0:
-        parser.error("--num-samples must be positive")
-    return args
-
-
-def main(argv=None):
-    args = parse_args(argv)
-    if args.input:
-        rows, texts = read_jsonl(args.input, args.text_field, args.max_chars)
-    else:
-        rows = make_demo_rows(args.num_samples)
-        texts = [row["review"][:args.max_chars] for row in rows]
-    devices = checked_devices(args.devices, args.mock, args.dtype)
-    if not args.mock and any(d == "cpu" for d in devices):
-        print("NOTE: CPU LLM inference can be very slow. Use --mock for a quick pipeline test.")
-    if args.mock:
-        print("MOCK MODE: heuristics only; no LLM loaded, no inference quality benchmark.")
-    print(f"{len(rows)} rows -> {len(devices)} worker(s): {', '.join(devices)}", flush=True)
-
-    order = sorted(range(len(texts)), key=lambda index: len(texts[index]), reverse=True)
-    batches = [order[i:i + args.batch_size] for i in range(0, len(order), args.batch_size)]
-
-    ctx = mp.get_context("spawn")
-    task_queue = ctx.Queue(maxsize=max(4, len(devices) * 2))
-    result_queue = ctx.Queue()
-    go = ctx.Event()
-    load_lock = ctx.Lock()
-    threads = max(1, (os.cpu_count() or 1) // len(devices))
-    procs = [
-        ctx.Process(
-            target=worker,
-            name=f"worker-{i}({device})",
-            args=(i, device, args, threads, load_lock, task_queue, result_queue, go),
-            daemon=True,
-        )
-        for i, device in enumerate(devices)
-    ]
-    for proc in procs:
-        proc.start()
-
-    producer_error = []
-    def feed_batches():
-        try:
-            for ids in batches:
-                task_queue.put((ids, [texts[i] for i in ids]))
-            for _ in devices:
-                task_queue.put(None)
-        except Exception as exc:
-            producer_error.append(exc)
-
-    answers: dict[int, str] = {}
-    row_counts = [0 for _ in devices]
-    token_count = 0
-    try:
-        load_start = time.perf_counter()
-        ready = set()
-        while len(ready) < len(devices):
-            kind, wid, info = receive(result_queue, procs, args.worker_timeout)
-            if kind != "ready" or wid in ready:
-                raise RuntimeError(f"Unexpected initialization message: {kind} from {wid}")
-            ready.add(wid)
-            print(f"  Worker {wid} ready: {info}", flush=True)
-        load_seconds = time.perf_counter() - load_start
-        producer = threading.Thread(target=feed_batches, daemon=True)
-        producer.start()
-        go.set()
-        run_start = time.perf_counter()
-        with tqdm(total=len(rows), unit="row", desc="Inference") as progress:
-            while len(answers) < len(rows):
-                kind, wid, payload = receive(result_queue, procs, args.worker_timeout)
-                if kind == "finished":
-                    continue
-                if kind != "batch":
-                    raise RuntimeError(f"Unexpected work message: {kind}")
-                ids, outputs, count = payload
-                if len(ids) != len(outputs):
-                    raise RuntimeError(f"Worker {wid} returned {len(outputs)} outputs for {len(ids)} inputs")
-                if any(i in answers for i in ids):
-                    raise RuntimeError(f"Worker {wid} returned a duplicate row index")
-                answers.update(zip(ids, outputs, strict=True))
-                row_counts[wid] += len(ids)
-                token_count += count
-                progress.update(len(ids))
-        run_seconds = max(time.perf_counter() - run_start, 1e-9)
-        producer.join(timeout=5)
-        if producer_error:
-            raise RuntimeError(f"Task producer failed: {producer_error[0]}")
-        for proc in procs:
-            proc.join(timeout=15)
-        if any(proc.is_alive() for proc in procs):
-            raise RuntimeError("Some inference workers did not shut down normally")
-    finally:
-        for proc in procs:
-            if proc.is_alive():
-                proc.terminate()
-        for proc in procs:
-            proc.join(timeout=5)
-        task_queue.cancel_join_thread()
-        result_queue.cancel_join_thread()
-        task_queue.close()
-        result_queue.close()
-
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8", newline="\n") as out:
-        for idx, row in enumerate(rows):
-            answer = answers[idx]
-            output_row = {**row, "llm_output": answer, "predicted_label": normalized_label(answer)}
-            out.write(json.dumps(output_row, ensure_ascii=False) + "\n")
-
-    print(f"Model load: {load_seconds:.2f}s | inference: {run_seconds:.2f}s | "
-          f"{len(rows)/run_seconds:.2f} rows/s | ~{token_count/run_seconds:.0f} output tokens/s")
-    for i, device in enumerate(devices):
-        print(f"  Worker {i} ({device}) processed {row_counts[i]} rows")
-    labeled = [i for i, row in enumerate(rows) if row.get("label") in ("positive", "negative")]
-    if labeled:
-        good = sum(normalized_label(answers[i]) == rows[i]["label"] for i in labeled)
-        print(f"Sentiment accuracy: {good}/{len(labeled)} ({good/len(labeled):.1%})"
-              + (" [MOCK; not an LLM benchmark]" if args.mock else ""))
-    print(f"Output file: {args.output.resolve()}")
-
-
-if __name__ == "__main__":
-    mp.freeze_support()  # recommended for Windows executables and multiprocessing
-    main()
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "4f906315",
+   "metadata": {},
+   "source": [
+    "# Parallel LLM Inference — Colab, Kaggle and Local Jupyter\n",
+    "\n",
+    "**Batch inference with one independent Qwen2.5-0.5B-Instruct replica per GPU.** Jobs are divided across spawned worker processes and reassembled into JSONL in the input order.\n",
+    "\n",
+    "Run every cell for an **offline multiprocessing smoke test**; no model download or GPU is required for that path. Real inference is intentionally opt-in. The notebook writes a real `.py` script and launches it as a subprocess because spawning workers directly from a Jupyter cell is unreliable, especially on Windows."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "7757690c",
+   "metadata": {},
+   "source": [
+    "## 1. Environment and installation\n",
+    "\n",
+    "If libraries are missing, run this installation cell once and then restart the kernel if prompted. On Colab/Kaggle, PyTorch is often preinstalled; **do not blindly replace a working CUDA-enabled build**."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "b188e717",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Optional dependency installation (uncomment to run when needed):\n",
+    "# %pip install \"tqdm>=4.66\" \"transformers==5.22.2\" \"safetensors>=0.4\"\n",
+    "# For a fresh Windows environment: python -m pip install -r requirements.txt\n",
+    "import sys\n",
+    "import importlib.util\n",
+    "for package in (\"torch\", \"tqdm\", \"transformers\", \"safetensors\"):\n",
+    "    print(f\"{package}: {'installed' if importlib.util.find_spec(package) else 'missing'}\")\n",
+    "print(\"Python:\", sys.version.split()[0])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "99598074",
+   "metadata": {},
+   "source": [
+    "## 2. GPU discovery — one GPU works, two GPUs enable actual multi-GPU inference"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "92d43c1b",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import torch\n",
+    "import subprocess\n",
+    "import sys\n",
+    "from pathlib import Path\n",
+    "print(\"PyTorch:\", torch.__version__)\n",
+    "print(\"CUDA build:\", torch.version.cuda)\n",
+    "print(\"CUDA available:\", torch.cuda.is_available())\n",
+    "print(\"Visible GPUs:\", torch.cuda.device_count())\n",
+    "for gpu_idx in range(torch.cuda.device_count()):\n",
+    "    print(f\"GPU {gpu_idx}: {torch.cuda.get_device_name(gpu_idx)}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "bdec29bd",
+   "metadata": {},
+   "source": [
+    "## 3. Write the complete standalone inference program\n",
+    "\n",
+    "The code is maintained as a normal Python script so `multiprocessing` can safely use the `spawn` start method. You may download/use this script directly without the notebook."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "9e099b29",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "%%writefile parallel_llm_inference.py\n",
+    "\"\"\"Parallel LLM sentiment inference: one model replica and worker per GPU.\n",
+    "\n",
+    "The input must be JSONL (one JSON object per line) with a nonempty text field,\n",
+    "which defaults to 'review'. Optional 'label' allows sentiment evaluation.\n",
+    "\n",
+    "Examples (run as a .py SCRIPT, not directly in an ipykernel cell):\n",
+    "\n",
+    "  # Fast offline multiprocessing check; NO model download or GPU required\n",
+    "  python parallel_llm_inference.py --mock --devices cpu cpu \\\n",
+    "      --input reviews.jsonl --output results_mock.jsonl\n",
+    "\n",
+    "  # On a single NVIDIA GPU (use a small batch on 4 GB VRAM)\n",
+    "  python parallel_llm_inference.py --devices cuda:0 \\\n",
+    "      --input reviews.jsonl --output results_gpu.jsonl --batch-size 1\n",
+    "\n",
+    "  # On a computer with two visible NVIDIA GPUs\n",
+    "  python parallel_llm_inference.py --devices cuda:0 cuda:1 \\\n",
+    "      --input reviews.jsonl --output results_2gpu.jsonl --batch-size 2\n",
+    "\n",
+    "This is independent-batch INFERENCE. It does not train or split one model\n",
+    "across multiple GPUs. Each GPU must have enough memory for a full model copy.\n",
+    "\"\"\"\n",
+    "\n",
+    "from __future__ import annotations\n",
+    "\n",
+    "import argparse\n",
+    "import json\n",
+    "import multiprocessing as mp\n",
+    "import os\n",
+    "from pathlib import Path\n",
+    "import queue\n",
+    "import random\n",
+    "import re\n",
+    "import signal\n",
+    "import time\n",
+    "import traceback\n",
+    "import threading\n",
+    "from typing import Any\n",
+    "\n",
+    "import torch\n",
+    "from tqdm.auto import tqdm\n",
+    "\n",
+    "\n",
+    "POSITIVE_PHRASES = [\n",
+    "    \"excellent\", \"fantastic\", \"amazing\", \"great\", \"wonderful\", \"reliable\",\n",
+    "    \"impressive\", \"love\", \"perfect\", \"smooth\", \"recommended\", \"satisfied\",\n",
+    "]\n",
+    "NEGATIVE_PHRASES = [\n",
+    "    \"terrible\", \"awful\", \"broken\", \"disappointed\", \"poor\", \"faulty\",\n",
+    "    \"unreliable\", \"hate\", \"worst\", \"stopped working\", \"failed\", \"frustrating\",\n",
+    "]\n",
+    "\n",
+    "\n",
+    "def build_messages(text: str) -> list[dict[str, str]]:\n",
+    "    return [{\n",
+    "        \"role\": \"user\",\n",
+    "        \"content\": (\n",
+    "            \"Classify this product review as positive or negative. \"\n",
+    "            \"Reply with exactly one word: positive or negative.\\n\\n\"\n",
+    "            f\"Review: {text}\"\n",
+    "        ),\n",
+    "    }]\n",
+    "\n",
+    "\n",
+    "def make_demo_rows(n: int, seed: int = 2026) -> list[dict[str, Any]]:\n",
+    "    \"\"\"Optional generated sample data when --input is omitted.\"\"\"\n",
+    "    rng = random.Random(seed)\n",
+    "    components = [\"battery\", \"display\", \"keyboard\", \"microphone\", \"touchpad\", \"fan\", \"speaker\"]\n",
+    "    pos = [\"is excellent\", \"works perfectly\", \"is reliable\", \"is impressive\", \"feels great\"]\n",
+    "    neg = [\"is terrible\", \"stopped working\", \"is unreliable\", \"is broken\", \"is disappointing\"]\n",
+    "    rows = []\n",
+    "    for i in range(n):\n",
+    "        label = \"positive\" if i % 2 == 0 else \"negative\"\n",
+    "        phrases = pos if label == \"positive\" else neg\n",
+    "        count = rng.randint(1, 4)\n",
+    "        text = \" \".join(f\"The {component} {rng.choice(phrases)}.\" for component in rng.sample(components, count))\n",
+    "        rows.append({\"id\": i + 1, \"review\": text, \"label\": label})\n",
+    "    return rows\n",
+    "\n",
+    "\n",
+    "def read_jsonl(path: Path, text_field: str, max_chars: int | None) -> tuple[list[dict], list[str]]:\n",
+    "    if not path.is_file():\n",
+    "        raise FileNotFoundError(f\"Input JSONL file does not exist: {path}\")\n",
+    "    rows: list[dict] = []\n",
+    "    texts: list[str] = []\n",
+    "    with path.open(\"r\", encoding=\"utf-8-sig\") as handle:\n",
+    "        for lineno, line in enumerate(handle, 1):\n",
+    "            if not line.strip():\n",
+    "                continue\n",
+    "            try:\n",
+    "                row = json.loads(line)\n",
+    "            except json.JSONDecodeError as exc:\n",
+    "                raise ValueError(f\"Invalid JSON on line {lineno} of {path}: {exc}\") from exc\n",
+    "            if not isinstance(row, dict):\n",
+    "                raise ValueError(f\"Line {lineno} must be a JSON object, not {type(row).__name__}\")\n",
+    "            if text_field not in row:\n",
+    "                raise ValueError(\n",
+    "                    f\"Line {lineno} is missing '{text_field}'. \"\n",
+    "                    f\"Use --text-field to select the review field; found {sorted(row)}\"\n",
+    "                )\n",
+    "            text = row[text_field]\n",
+    "            if not isinstance(text, str) or not text.strip():\n",
+    "                raise ValueError(f\"Line {lineno}: '{text_field}' must be a nonempty string\")\n",
+    "            rows.append(row)\n",
+    "            texts.append(text[:max_chars] if max_chars is not None else text)\n",
+    "    if not rows:\n",
+    "        raise ValueError(f\"Input JSONL file contains no valid records: {path}\")\n",
+    "    return rows, texts\n",
+    "\n",
+    "\n",
+    "def normalized_label(answer: str) -> str | None:\n",
+    "    \"\"\"Accept one-word labels, optionally followed by punctuation; reject explanations.\"\"\"\n",
+    "    match = re.fullmatch(r\"\\s*(positive|negative)\\s*[.!]?\\s*\", answer, re.IGNORECASE)\n",
+    "    return match.group(1).lower() if match else None\n",
+    "\n",
+    "\n",
+    "def mock_generate(texts: list[str]) -> tuple[list[str], int]:\n",
+    "    \"\"\"Deterministic HEURISTIC ONLY: tests queueing and output, NOT LLM quality.\"\"\"\n",
+    "    results = []\n",
+    "    for text in texts:\n",
+    "        lower = text.lower()\n",
+    "        neg = any(phrase in lower for phrase in NEGATIVE_PHRASES)\n",
+    "        pos = any(phrase in lower for phrase in POSITIVE_PHRASES)\n",
+    "        results.append(\"negative\" if neg and not pos else \"positive\" if pos and not neg else \"negative\")\n",
+    "    return results, len(results)\n",
+    "\n",
+    "\n",
+    "def load_model(model_id: str, device: str, dtype: str | None):\n",
+    "    try:\n",
+    "        from transformers import AutoModelForCausalLM, AutoTokenizer\n",
+    "    except ImportError as exc:\n",
+    "        raise RuntimeError(\"Install Transformers: python -m pip install transformers==5.22.2\") from exc\n",
+    "\n",
+    "    tokenizer = AutoTokenizer.from_pretrained(model_id)\n",
+    "    tokenizer.padding_side = \"left\"  # decoder-only models generate after the final token\n",
+    "    if tokenizer.pad_token_id is None:\n",
+    "        if tokenizer.eos_token_id is None:\n",
+    "            raise RuntimeError(\"Tokenizer has no EOS/padding token\")\n",
+    "        tokenizer.pad_token = tokenizer.eos_token\n",
+    "\n",
+    "    chosen_dtype = dtype or (\"float16\" if device.startswith(\"cuda\") else \"float32\")\n",
+    "    model = AutoModelForCausalLM.from_pretrained(\n",
+    "        model_id, dtype=getattr(torch, chosen_dtype)\n",
+    "    )\n",
+    "    # Each worker explicitly owns exactly one device; no accelerate/device_map needed.\n",
+    "    model = model.to(torch.device(device)).eval()\n",
+    "    model.generation_config.pad_token_id = tokenizer.pad_token_id\n",
+    "    return tokenizer, model\n",
+    "\n",
+    "\n",
+    "@torch.inference_mode()\n",
+    "def generate_batch(model, tokenizer, texts: list[str], max_new_tokens: int, max_input_tokens: int):\n",
+    "    encoded = tokenizer.apply_chat_template(\n",
+    "        [build_messages(t) for t in texts],\n",
+    "        tokenize=True,\n",
+    "        add_generation_prompt=True,\n",
+    "        padding=True,\n",
+    "        truncation=True,\n",
+    "        max_length=max_input_tokens,\n",
+    "        return_tensors=\"pt\",\n",
+    "        return_dict=True,\n",
+    "    ).to(model.device)\n",
+    "    output = model.generate(\n",
+    "        **encoded,\n",
+    "        do_sample=False,\n",
+    "        max_new_tokens=max_new_tokens,\n",
+    "        pad_token_id=tokenizer.pad_token_id,\n",
+    "    )\n",
+    "    generated = output[:, encoded[\"input_ids\"].shape[1]:]\n",
+    "    answers = [answer.strip() for answer in tokenizer.batch_decode(generated, skip_special_tokens=True)]\n",
+    "    # Approximate generated tokens, including any first EOS but excluding subsequent pad tokens.\n",
+    "    eos_ids = model.generation_config.eos_token_id\n",
+    "    eos_ids = {eos_ids} if isinstance(eos_ids, int) else set(eos_ids or [])\n",
+    "    counts = 0\n",
+    "    for seq in generated.tolist():\n",
+    "        for token_id in seq:\n",
+    "            counts += 1\n",
+    "            if token_id in eos_ids:\n",
+    "                break\n",
+    "    return answers, counts\n",
+    "\n",
+    "\n",
+    "def worker(worker_id, device, args, threads, load_lock, task_queue, result_queue, go_event):\n",
+    "    \"\"\"Top-level function is picklable under Windows multiprocessing spawn.\"\"\"\n",
+    "    try:\n",
+    "        signal.signal(signal.SIGINT, signal.SIG_IGN)\n",
+    "        if device == \"cpu\":\n",
+    "            torch.set_num_threads(threads)\n",
+    "        else:\n",
+    "            torch.cuda.set_device(int(device.split(\":\", 1)[1]))\n",
+    "\n",
+    "        if args.mock:\n",
+    "            model = tokenizer = None\n",
+    "        else:\n",
+    "            with load_lock:  # avoid concurrent weight downloads and RAM spikes\n",
+    "                tokenizer, model = load_model(args.model, device, args.dtype)\n",
+    "\n",
+    "        name = torch.cuda.get_device_name(device) if device.startswith(\"cuda\") else \"CPU\"\n",
+    "        result_queue.put((\"ready\", worker_id, f\"{device}: {name}\"))\n",
+    "        go_event.wait()\n",
+    "        while True:\n",
+    "            item = task_queue.get()\n",
+    "            if item is None:\n",
+    "                break\n",
+    "            ids, texts = item\n",
+    "            if args.mock:\n",
+    "                outputs, token_count = mock_generate(texts)\n",
+    "            else:\n",
+    "                outputs, token_count = generate_batch(\n",
+    "                    model, tokenizer, texts, args.max_new_tokens, args.max_input_tokens\n",
+    "                )\n",
+    "            result_queue.put((\"batch\", worker_id, (ids, outputs, token_count)))\n",
+    "        result_queue.put((\"finished\", worker_id, None))\n",
+    "    except BaseException:\n",
+    "        result_queue.put((\"error\", worker_id, traceback.format_exc()))\n",
+    "\n",
+    "\n",
+    "def receive(queue_, procs, timeout_seconds: int):\n",
+    "    deadline = time.monotonic() + timeout_seconds\n",
+    "    while time.monotonic() < deadline:\n",
+    "        try:\n",
+    "            kind, wid, payload = queue_.get(timeout=0.5)\n",
+    "        except queue.Empty:\n",
+    "            for proc in procs:\n",
+    "                if proc.exitcode is not None and proc.exitcode != 0:\n",
+    "                    raise RuntimeError(f\"{proc.name} crashed with exit code {proc.exitcode}\")\n",
+    "            if all(proc.exitcode is not None for proc in procs):\n",
+    "                raise RuntimeError(\"Workers exited before all results arrived; inspect worker errors\")\n",
+    "            continue\n",
+    "        if kind == \"error\":\n",
+    "            raise RuntimeError(f\"Worker {wid} failed:\\n{payload}\")\n",
+    "        return kind, wid, payload\n",
+    "    raise TimeoutError(f\"No worker response within {timeout_seconds} seconds\")\n",
+    "\n",
+    "\n",
+    "def checked_devices(requested: list[str] | None, mock: bool, dtype: str | None):\n",
+    "    count = torch.cuda.device_count()\n",
+    "    devices = requested or ([f\"cuda:{i}\" for i in range(count)] if count else [\"cpu\"])\n",
+    "    if len(devices) != len(set(devices)) and any(d.startswith(\"cuda:\") for d in devices):\n",
+    "        raise ValueError(\"Duplicate CUDA devices are disabled: a second model replica can exhaust VRAM\")\n",
+    "    for device in devices:\n",
+    "        if device == \"cpu\":\n",
+    "            if dtype in {\"float16\", \"bfloat16\"} and not mock:\n",
+    "                raise ValueError(\"Use float32 for CPU inference\")\n",
+    "            continue\n",
+    "        if not re.fullmatch(r\"cuda:\\d+\", device):\n",
+    "            raise ValueError(f\"Invalid device '{device}'; expected 'cpu' or 'cuda:0', 'cuda:1', ...\")\n",
+    "        idx = int(device.partition(\":\")[2])\n",
+    "        if idx >= count:\n",
+    "            raise ValueError(\n",
+    "                f\"Requested {device}, but PyTorch detects {count} CUDA GPU(s). \"\n",
+    "                \"Check torch.cuda.is_available() and your PyTorch CUDA build.\"\n",
+    "            )\n",
+    "        if dtype == \"bfloat16\" and torch.cuda.get_device_capability(idx)[0] < 8:\n",
+    "            raise ValueError(f\"{device} does not support efficient bfloat16; use float16\")\n",
+    "    return devices\n",
+    "\n",
+    "\n",
+    "def parse_args(argv=None):\n",
+    "    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)\n",
+    "    parser.add_argument(\"--model\", default=\"Qwen/Qwen2.5-0.5B-Instruct\")\n",
+    "    parser.add_argument(\"--devices\", nargs=\"+\", help=\"e.g. cuda:0 cuda:1 or cpu cpu for mock tests\")\n",
+    "    parser.add_argument(\"--input\", type=Path, help=\"UTF-8 JSONL input\")\n",
+    "    parser.add_argument(\"--text-field\", default=\"review\", help=\"JSON field containing text (default: review)\")\n",
+    "    parser.add_argument(\"--output\", type=Path, default=Path(\"results.jsonl\"))\n",
+    "    parser.add_argument(\"--num-samples\", type=int, default=40, help=\"demo records when --input is omitted\")\n",
+    "    parser.add_argument(\"--batch-size\", type=int, default=2, help=\"examples per generate call\")\n",
+    "    parser.add_argument(\"--max-new-tokens\", type=int, default=8)\n",
+    "    parser.add_argument(\"--max-input-tokens\", type=int, default=256)\n",
+    "    parser.add_argument(\"--max-chars\", type=int, default=1200)\n",
+    "    parser.add_argument(\"--dtype\", choices=[\"float16\", \"bfloat16\", \"float32\"])\n",
+    "    parser.add_argument(\"--worker-timeout\", type=int, default=900, help=\"timeout per worker response\")\n",
+    "    parser.add_argument(\"--mock\", action=\"store_true\", help=\"offline heuristic backend: test multiprocessing only\")\n",
+    "    args = parser.parse_args(argv)\n",
+    "    for key in (\"batch_size\", \"max_new_tokens\", \"max_input_tokens\", \"worker_timeout\"):\n",
+    "        if getattr(args, key) <= 0:\n",
+    "            parser.error(f\"--{key.replace('_', '-')} must be positive\")\n",
+    "    if args.max_chars is not None and args.max_chars <= 0:\n",
+    "        parser.error(\"--max-chars must be positive\")\n",
+    "    if args.num_samples <= 0:\n",
+    "        parser.error(\"--num-samples must be positive\")\n",
+    "    return args\n",
+    "\n",
+    "\n",
+    "def main(argv=None):\n",
+    "    args = parse_args(argv)\n",
+    "    if args.input:\n",
+    "        rows, texts = read_jsonl(args.input, args.text_field, args.max_chars)\n",
+    "    else:\n",
+    "        rows = make_demo_rows(args.num_samples)\n",
+    "        texts = [row[\"review\"][:args.max_chars] for row in rows]\n",
+    "    devices = checked_devices(args.devices, args.mock, args.dtype)\n",
+    "    if not args.mock and any(d == \"cpu\" for d in devices):\n",
+    "        print(\"NOTE: CPU LLM inference can be very slow. Use --mock for a quick pipeline test.\")\n",
+    "    if args.mock:\n",
+    "        print(\"MOCK MODE: heuristics only; no LLM loaded, no inference quality benchmark.\")\n",
+    "    print(f\"{len(rows)} rows -> {len(devices)} worker(s): {', '.join(devices)}\", flush=True)\n",
+    "\n",
+    "    order = sorted(range(len(texts)), key=lambda index: len(texts[index]), reverse=True)\n",
+    "    batches = [order[i:i + args.batch_size] for i in range(0, len(order), args.batch_size)]\n",
+    "\n",
+    "    ctx = mp.get_context(\"spawn\")\n",
+    "    task_queue = ctx.Queue(maxsize=max(4, len(devices) * 2))\n",
+    "    result_queue = ctx.Queue()\n",
+    "    go = ctx.Event()\n",
+    "    load_lock = ctx.Lock()\n",
+    "    threads = max(1, (os.cpu_count() or 1) // len(devices))\n",
+    "    procs = [\n",
+    "        ctx.Process(\n",
+    "            target=worker,\n",
+    "            name=f\"worker-{i}({device})\",\n",
+    "            args=(i, device, args, threads, load_lock, task_queue, result_queue, go),\n",
+    "            daemon=True,\n",
+    "        )\n",
+    "        for i, device in enumerate(devices)\n",
+    "    ]\n",
+    "    for proc in procs:\n",
+    "        proc.start()\n",
+    "\n",
+    "    producer_error = []\n",
+    "    def feed_batches():\n",
+    "        try:\n",
+    "            for ids in batches:\n",
+    "                task_queue.put((ids, [texts[i] for i in ids]))\n",
+    "            for _ in devices:\n",
+    "                task_queue.put(None)\n",
+    "        except Exception as exc:\n",
+    "            producer_error.append(exc)\n",
+    "\n",
+    "    answers: dict[int, str] = {}\n",
+    "    row_counts = [0 for _ in devices]\n",
+    "    token_count = 0\n",
+    "    try:\n",
+    "        load_start = time.perf_counter()\n",
+    "        ready = set()\n",
+    "        while len(ready) < len(devices):\n",
+    "            kind, wid, info = receive(result_queue, procs, args.worker_timeout)\n",
+    "            if kind != \"ready\" or wid in ready:\n",
+    "                raise RuntimeError(f\"Unexpected initialization message: {kind} from {wid}\")\n",
+    "            ready.add(wid)\n",
+    "            print(f\"  Worker {wid} ready: {info}\", flush=True)\n",
+    "        load_seconds = time.perf_counter() - load_start\n",
+    "        producer = threading.Thread(target=feed_batches, daemon=True)\n",
+    "        producer.start()\n",
+    "        go.set()\n",
+    "        run_start = time.perf_counter()\n",
+    "        with tqdm(total=len(rows), unit=\"row\", desc=\"Inference\") as progress:\n",
+    "            while len(answers) < len(rows):\n",
+    "                kind, wid, payload = receive(result_queue, procs, args.worker_timeout)\n",
+    "                if kind == \"finished\":\n",
+    "                    continue\n",
+    "                if kind != \"batch\":\n",
+    "                    raise RuntimeError(f\"Unexpected work message: {kind}\")\n",
+    "                ids, outputs, count = payload\n",
+    "                if len(ids) != len(outputs):\n",
+    "                    raise RuntimeError(f\"Worker {wid} returned {len(outputs)} outputs for {len(ids)} inputs\")\n",
+    "                if any(i in answers for i in ids):\n",
+    "                    raise RuntimeError(f\"Worker {wid} returned a duplicate row index\")\n",
+    "                answers.update(zip(ids, outputs, strict=True))\n",
+    "                row_counts[wid] += len(ids)\n",
+    "                token_count += count\n",
+    "                progress.update(len(ids))\n",
+    "        run_seconds = max(time.perf_counter() - run_start, 1e-9)\n",
+    "        producer.join(timeout=5)\n",
+    "        if producer_error:\n",
+    "            raise RuntimeError(f\"Task producer failed: {producer_error[0]}\")\n",
+    "        for proc in procs:\n",
+    "            proc.join(timeout=15)\n",
+    "        if any(proc.is_alive() for proc in procs):\n",
+    "            raise RuntimeError(\"Some inference workers did not shut down normally\")\n",
+    "    finally:\n",
+    "        for proc in procs:\n",
+    "            if proc.is_alive():\n",
+    "                proc.terminate()\n",
+    "        for proc in procs:\n",
+    "            proc.join(timeout=5)\n",
+    "        task_queue.cancel_join_thread()\n",
+    "        result_queue.cancel_join_thread()\n",
+    "        task_queue.close()\n",
+    "        result_queue.close()\n",
+    "\n",
+    "    args.output.parent.mkdir(parents=True, exist_ok=True)\n",
+    "    with args.output.open(\"w\", encoding=\"utf-8\", newline=\"\\n\") as out:\n",
+    "        for idx, row in enumerate(rows):\n",
+    "            answer = answers[idx]\n",
+    "            output_row = {**row, \"llm_output\": answer, \"predicted_label\": normalized_label(answer)}\n",
+    "            out.write(json.dumps(output_row, ensure_ascii=False) + \"\\n\")\n",
+    "\n",
+    "    print(f\"Model load: {load_seconds:.2f}s | inference: {run_seconds:.2f}s | \"\n",
+    "          f\"{len(rows)/run_seconds:.2f} rows/s | ~{token_count/run_seconds:.0f} output tokens/s\")\n",
+    "    for i, device in enumerate(devices):\n",
+    "        print(f\"  Worker {i} ({device}) processed {row_counts[i]} rows\")\n",
+    "    labeled = [i for i, row in enumerate(rows) if row.get(\"label\") in (\"positive\", \"negative\")]\n",
+    "    if labeled:\n",
+    "        good = sum(normalized_label(answers[i]) == rows[i][\"label\"] for i in labeled)\n",
+    "        print(f\"Sentiment accuracy: {good}/{len(labeled)} ({good/len(labeled):.1%})\"\n",
+    "              + (\" [MOCK; not an LLM benchmark]\" if args.mock else \"\"))\n",
+    "    print(f\"Output file: {args.output.resolve()}\")\n",
+    "\n",
+    "\n",
+    "if __name__ == \"__main__\":\n",
+    "    mp.freeze_support()  # recommended for Windows executables and multiprocessing\n",
+    "    main()\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "b2e47c8c",
+   "metadata": {},
+   "source": [
+    "## 4. Create a small reproducible JSONL dataset"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "c600411e",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import json\n",
+    "from pathlib import Path\n",
+    "from parallel_llm_inference import make_demo_rows\n",
+    "sample = make_demo_rows(48, seed=2026)\n",
+    "with Path(\"reviews.jsonl\").open(\"w\", encoding=\"utf-8\") as handle:\n",
+    "    for record in sample:\n",
+    "        handle.write(json.dumps(record, ensure_ascii=False) + \"\\n\")\n",
+    "print(\"Wrote\", len(sample), \"records to reviews.jsonl\")\n",
+    "print(sample[0])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "55ee4899",
+   "metadata": {},
+   "source": [
+    "## 5. Offline validation — two CPU workers\n",
+    "\n",
+    "This invokes the same script you will use for a GPU run, but substitutes a keyword-based mock. It validates queue distribution and output handling, **not** LLM quality."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "f9bd9c96",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import subprocess\n",
+    "import sys\n",
+    "command = [sys.executable, \"parallel_llm_inference.py\", \"--mock\", \"--devices\", \"cpu\", \"cpu\", \n",
+    "           \"--input\", \"reviews.jsonl\", \"--output\", \"results_mock.jsonl\", \"--batch-size\", \"4\", \"--worker-timeout\", \"120\"]\n",
+    "print(\"Running:\", \" \".join(command))\n",
+    "result = subprocess.run(command, text=True, capture_output=True, timeout=240)\n",
+    "print(result.stdout)\n",
+    "if result.returncode:\n",
+    "    print(result.stderr)\n",
+    "    raise RuntimeError(f\"Mock subprocess returned exit code {result.returncode}\")\n",
+    "print(\"Mock multiprocessing test completed\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "1f5ecf21",
+   "metadata": {},
+   "source": [
+    "## 6. Examine results, ensure input order is preserved"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "e71040d2",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import json\n",
+    "from pathlib import Path\n",
+    "inputs = [json.loads(s) for s in Path(\"reviews.jsonl\").read_text(encoding=\"utf-8\").splitlines() if s]\n",
+    "outputs = [json.loads(s) for s in Path(\"results_mock.jsonl\").read_text(encoding=\"utf-8\").splitlines() if s]\n",
+    "assert len(inputs) == len(outputs)\n",
+    "assert [r[\"id\"] for r in inputs] == [r[\"id\"] for r in outputs]\n",
+    "assert all(\"predicted_label\" in row and \"llm_output\" in row for row in outputs)\n",
+    "print(\"Verified\", len(outputs), \"outputs in input order\")\n",
+    "for row in outputs[:5]:\n",
+    "    print(row)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "371762bf",
+   "metadata": {},
+   "source": [
+    "## 7. Optional: Real Qwen inference with your available GPU(s)\n",
+    "\n",
+    "**Disabled by default.** Real inference downloads `Qwen/Qwen2.5-0.5B-Instruct`, uses model memory on **each GPU**, and requires an appropriate CUDA-enabled PyTorch installation. Start with batch size 1 on a 4 GB GPU. Notebook kernels in Google Colab commonly expose one GPU; Kaggle sometimes offers two T4 GPUs."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "c0b845b7",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "RUN_REAL_INFERENCE = False   # Change to True only after installing Transformers and selecting a GPU runtime\n",
+    "USE_ALL_GPUS = False        # Set True to run one worker on each visible GPU\n",
+    "if RUN_REAL_INFERENCE:\n",
+    "    count = torch.cuda.device_count()\n",
+    "    if count < 1:\n",
+    "        raise RuntimeError(\"No CUDA GPU visible. Activate a GPU runtime and verify CUDA-enabled PyTorch.\")\n",
+    "    devices = [f\"cuda:{i}\" for i in range(count)] if USE_ALL_GPUS else [\"cuda:0\"]\n",
+    "    cmd = [sys.executable, \"parallel_llm_inference.py\", \"--devices\", *devices,\n",
+    "           \"--input\", \"reviews.jsonl\", \"--output\", \"results_gpu.jsonl\",\n",
+    "           \"--batch-size\", \"1\", \"--max-input-tokens\", \"192\", \"--max-new-tokens\", \"8\"]\n",
+    "    subprocess.run(cmd, check=True)\n",
+    "    print(\"Wrote results_gpu.jsonl\")\n",
+    "else:\n",
+    "    print(\"Real Qwen inference is disabled; the mock results above are ready.\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "2fa12c30",
+   "metadata": {},
+   "source": [
+    "## 8. Optional: Compare throughput on one vs. two GPUs\n",
+    "\n",
+    "For a meaningful comparison, use **the same** dataset and generation settings. Only activate the second test if `torch.cuda.device_count() >= 2`. Small samples and model-loading overhead can distort results, so compare reported **inference rows/s** and consider increasing the dataset size."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "50cc354e",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "RUN_TWO_GPU_COMPARISON = False\n",
+    "if RUN_TWO_GPU_COMPARISON:\n",
+    "    if torch.cuda.device_count() < 2:\n",
+    "        raise RuntimeError(\"Need two visible CUDA GPUs for a genuine multi-GPU comparison.\")\n",
+    "    for names, output in [([\"cuda:0\"], \"baseline_1gpu.jsonl\"),\n",
+    "                          ([\"cuda:0\", \"cuda:1\"], \"results_2gpu.jsonl\")]:\n",
+    "        cmd = [sys.executable, \"parallel_llm_inference.py\", \"--devices\", *names,\n",
+    "               \"--input\", \"reviews.jsonl\", \"--output\", output,\n",
+    "               \"--batch-size\", \"1\", \"--max-input-tokens\", \"192\", \"--max-new-tokens\", \"8\"]\n",
+    "        subprocess.run(cmd, check=True)\n",
+    "else:\n",
+    "    print(\"Two-GPU benchmark disabled. Enable only on a real two-GPU runtime.\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "12037a2c",
+   "metadata": {},
+   "source": [
+    "## 9. Use your own data\n",
+    "\n",
+    "Put one JSON object per line into `my_reviews.jsonl` with a nonempty `review` key (or change the key using `--text-field`). Then launch:\n",
+    "\n",
+    "```python\n",
+    "subprocess.run([sys.executable, \"parallel_llm_inference.py\", \"--devices\", \"cuda:0\", \"--input\", \"my_reviews.jsonl\", \"--output\", \"my_results.jsonl\", \"--batch-size\", \"1\"], check=True)\n",
+    "```\n",
+    "\n",
+    "The output preserves original fields and appends `llm_output` and `predicted_label`. Outputs with extra text get `predicted_label: null`. The mock backend is **not** a substitute for genuine model inference."
+   ]
+  }
+ ],
+ "metadata": {
+  "colab": {
+   "name": "Parallel_LLM_Inference_Colab_Kaggle.ipynb",
+   "provenance": []
+  },
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "name": "python"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
