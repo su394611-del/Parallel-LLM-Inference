@@ -196,4 +196,3 @@ The implementation measures inference processing separately from startup/model l
 - [Hugging Face Transformers text generation](https://huggingface.co/docs/transformers/main_classes/text_generation)
 - [Qwen2.5-0.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct)
 
-*Educational code; review model licenses, dataset privacy, dependencies, and environment requirements before reuse.*
