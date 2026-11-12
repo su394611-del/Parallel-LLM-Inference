@@ -1,25 +1,110 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport"
         content="width=device-width, initial-scale=1">
-  <title>Parallel LLM Inference | PyTorch</title>
+
+  <title>
+    Parallel LLM Inference |
+    PyTorch, Qwen2.5 and Multi-GPU
+  </title>
+
   <meta name="description"
-        content="Parallel LLM inference with PyTorch,
-        Hugging Face Transformers, Qwen2.5
-        and multi-GPU multiprocessing.">
+        content="Parallel LLM batch inference using
+        Python, PyTorch, Hugging Face Transformers,
+        Qwen2.5, multiprocessing, multi-GPU workers,
+        JSONL processing and sentiment classification.">
+
+  <meta name="robots" content="index, follow">
+
+  <link rel="canonical"
+        href="https://su394611-del.github.io/Parallel-LLM-Inference/">
 </head>
+
 <body>
-  <h1>Parallel LLM Inference</h1>
-  <p>
-    Parallel batch inference using PyTorch,
-    Hugging Face Transformers and Qwen2.5.
-  </p>
-  <a href="https://github.com/su394611-del/Parallel-LLM-Inference">
-    View Source Code on GitHub
-  </a>
+  <header>
+    <h1>Parallel LLM Inference with PyTorch</h1>
+
+    <p>
+      An educational AI engineering project
+      demonstrating parallel batch inference,
+      multi-process worker orchestration,
+      and sentiment classification using Qwen2.5.
+    </p>
+  </header>
+
+  <main>
+    <h2>Project Features</h2>
+    <ul>
+      <li>Parallel LLM batch inference</li>
+      <li>Qwen2.5-0.5B-Instruct model</li>
+      <li>PyTorch and Hugging Face Transformers</li>
+      <li>Python multiprocessing worker pool</li>
+      <li>Single-GPU and multi-GPU inference</li>
+      <li>Independent model replica per GPU</li>
+      <li>Shared task queue and result queue</li>
+      <li>Dynamic mini-batch processing</li>
+      <li>Length-sorted batches to reduce padding</li>
+      <li>Input and output JSONL validation</li>
+      <li>Product review sentiment classification</li>
+      <li>Stable output ordering</li>
+      <li>Inference performance measurements</li>
+      <li>Offline mock testing with CPU workers</li>
+      <li>Jupyter, Colab and Kaggle examples</li>
+    </ul>
+
+    <h2>System Architecture</h2>
+    <p>
+      Input JSONL records are validated by a
+      parent process and distributed through a
+      shared task queue to independent inference
+      workers. Each worker processes batches
+      using its assigned device. Results return
+      to the parent process, which restores
+      original input order.
+    </p>
+
+    <h2>Multi-GPU Inference</h2>
+    <p>
+      Each GPU loads a separate complete model
+      replica. This is data-parallel inference,
+      not DistributedDataParallel training or
+      tensor/model parallelism. GPU memory
+      is not combined across devices.
+    </p>
+
+    <h2>Qwen2.5 Sentiment Classification</h2>
+    <p>
+      The project demonstrates product-review
+      sentiment classification using
+      Qwen2.5-0.5B-Instruct with configurable
+      batch sizes, input token limits and
+      output generation settings.
+    </p>
+
+    <h2>Testing and Limitations</h2>
+    <p>
+      Offline mock testing validates queue
+      processing and file handling without
+      running an LLM. Real inference requires
+      compatible hardware and model weights.
+      Performance improvements are not guaranteed.
+    </p>
+
+    <h2>Source Code</h2>
+    <p>
+      <a href="https://github.com/su394611-del/Parallel-LLM-Inference">
+        View Parallel LLM Inference Repository
+      </a>
+    </p>
+
+    <h2>Technical Documentation</h2>
+    <p>
+      <a href="https://github.com/su394611-del/Parallel-LLM-Inference/wiki">
+        View GitHub Wiki and Architecture Documentation
+      </a>
+    </p>
+  </main>
 </body>
 </html>
-
