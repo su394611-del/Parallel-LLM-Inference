@@ -2,7 +2,7 @@
 
 An  **batch inference** project for classifying product-review sentiment using **Qwen2.5-0.5B-Instruct** and a multiprocessing worker pool. Each worker loads a **separate model replica** on its assigned GPU. Workers pull batches from a shared queue; the parent restores input order and writes predictions to JSONL.
 
-> **Scope:** This is parallel **inference**, not DDP training, model/tensor parallelism, or an HTTP-serving API. Each GPU must have enough VRAM for the entire model and its generation buffers. The included `--mock` backend is a deterministic keyword heuristic, **not** an LLM and **not** an accuracy benchmark.
+> **Scope:** This is parallel **inference**, not DDP training,.This also implements model/tensor parallelism, or an HTTP-serving API. Each GPU must have enough VRAM for the entire model and its generation buffers. The included `--mock` backend is a deterministic keyword heuristic.
 
 ## Features
 
@@ -67,7 +67,7 @@ In a notebook cell (if packages are absent):
 %pip install "tqdm>=4.66" "transformers==5.22.2" "safetensors>=0.4"
 ```
 
-Colab/Kaggle generally provide PyTorch already; verify the accelerator before modifying its installation. Select a GPU-enabled runtime in Colab; where available, Kaggle's **two T4 GPUs** configuration allows testing actual two-GPU inference. Standard Colab runtimes usually expose just one GPU.
+Colab/Kaggle generally provide PyTorch; verify the accelerator before modifying the installation. Select a GPU-enabled runtime in Colab; where available, Kaggle's **two T4 GPUs** configuration allows testing actual two-GPU inference. Standard Colab runtimes usually expose just one GPU.
 
 ## Quick start: fully offline test
 
@@ -128,7 +128,7 @@ Output `results_*.jsonl` preserves all original fields and adds:
 {"id": 1, "review": "The display is excellent.", "label": "positive", "llm_output": "positive", "predicted_label": "positive"}
 ```
 
-`predicted_label` is set to `null` if model output does not match the expected one-word format. Accuracy is computed only for rows with `label` values `positive` or `negative`.
+`predicted_label` is set to `null` if the model output does not match the expected one-word format. Accuracy is computed only for rows with `label` values `positive` or `negative`.
 
 ## Common CLI options
 
@@ -196,3 +196,6 @@ The implementation measures inference processing separately from startup/model l
 - [Hugging Face Transformers text generation](https://huggingface.co/docs/transformers/main_classes/text_generation)
 - [Qwen2.5-0.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct)
 
+  
+## Licesnse 
+This project is licensed under the Apache License, Version 2.0.© 2026 Sudhanshu Shukla · Licensed under the Apache License, Version 2.0.
