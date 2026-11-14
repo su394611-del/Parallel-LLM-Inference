@@ -1,110 +1,171 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1">
-
-  <title>
-    Parallel LLM Inference |
-    PyTorch, Qwen2.5 and Multi-GPU
-  </title>
-
-  <meta name="description"
-        content="Parallel LLM batch inference using
-        Python, PyTorch, Hugging Face Transformers,
-        Qwen2.5, multiprocessing, multi-GPU workers,
-        JSONL processing and sentiment classification.">
-
-  <meta name="robots" content="index, follow">
-
-  <link rel="canonical"
-        href="https://su394611-del.github.io/Parallel-LLM-Inference/">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070f20">
+<meta name="author" content="Sudhanshu Shukla">
+<meta name="description" content="Professional-grade PyTorch batch inference architecture for Qwen2.5-0.5B-Instruct: multiprocessing workers, independent GPU replicas, JSONL validation, stable ordering and observable execution.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<title>Parallel LLM Inference | Qwen2.5, PyTorch &amp; Multi-GPU</title>
+<link rel="canonical" href="https://su394611-del.github.io/Parallel-LLM-Inference/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website"><meta property="og:locale" content="en_US">
+<meta property="og:title" content="Parallel LLM Inference | PyTorch, Qwen2.5 &amp; Multi-GPU Workers">
+<meta property="og:description" content="Professional-grade PyTorch batch inference architecture for Qwen2.5-0.5B-Instruct: multiprocessing workers, independent GPU replicas, JSONL validation, stable ordering and observable execution.">
+<meta property="og:url" content="https://su394611-del.github.io/Parallel-LLM-Inference/">
+<meta property="og:image" content="https://su394611-del.github.io/Parallel-LLM-Inference/social-preview.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Parallel inference diagram showing JSONL input, queue, independent GPU workers and ordered results">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Parallel LLM Inference | PyTorch &amp; Qwen2.5">
+<meta name="twitter:description" content="Professional-grade PyTorch batch inference architecture for Qwen2.5-0.5B-Instruct: multiprocessing workers, independent GPU replicas, JSONL validation, stable ordering and observable execution.">
+<meta name="twitter:image" content="https://su394611-del.github.io/Parallel-LLM-Inference/social-preview.png">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://su394611-del.github.io/Parallel-LLM-Inference/#website","name":"Parallel LLM Inference Engineering","url":"https://su394611-del.github.io/Parallel-LLM-Inference/"},{"@type":"WebPage","@id":"https://su394611-del.github.io/Parallel-LLM-Inference/#webpage","name":"Parallel LLM Inference | PyTorch, Qwen2.5 and Multi-GPU Workers","url":"https://su394611-del.github.io/Parallel-LLM-Inference/","description":"Professional-grade PyTorch batch inference architecture for Qwen2.5-0.5B-Instruct: multiprocessing workers, independent GPU replicas, JSONL validation, stable ordering and observable execution.","inLanguage":"en","isPartOf":{"@id":"https://su394611-del.github.io/Parallel-LLM-Inference/#website"}},{"@type":"SoftwareSourceCode","name":"Parallel LLM Inference with PyTorch and Qwen2.5","description":"Python multiprocessing batch inference project with JSONL review classification, independent per-device Qwen model replicas and offline mock workers.","codeRepository":"https://github.com/su394611-del/Parallel-LLM-Inference","url":"https://su394611-del.github.io/Parallel-LLM-Inference/","programmingLanguage":"Python","runtimePlatform":"Python 3.12, PyTorch and Hugging Face Transformers","license":"https://www.apache.org/licenses/LICENSE-2.0","author":{"@type":"Person","name":"Sudhanshu Shukla","url":"https://github.com/su394611-del"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"AI portfolio","item":"https://su394611-del.github.io/"},{"@type":"ListItem","position":2,"name":"Parallel LLM Inference","item":"https://su394611-del.github.io/Parallel-LLM-Inference/"}]}]}</script>
+<style>
+:root{color-scheme:dark;--bg:#080f1f;--surface:#101c32;--surface2:#14243c;--line:#2c435e;--line2:#22374e;--ink:#eff8ff;--muted:#b4c4d6;--muted2:#90a7bc;--teal:#72e4db;--blue:#8cc8fd;--purple:#bbb1ff;--pink:#ffc1dc;--gold:#ffd09a;--max:1168px;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*,*:before,*:after{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:94px}body{margin:0;line-height:1.67;background:var(--bg);color:var(--ink);overflow-x:hidden}body:before{content:"";position:absolute;z-index:-1;left:0;right:0;top:0;height:850px;pointer-events:none;background:radial-gradient(ellipse 52% 38% at 9% 21%,#0c777226,transparent 70%),radial-gradient(ellipse 55% 52% at 92% 25%,#7763cb28,transparent 72%)}a{color:inherit;text-decoration:none}button{font:inherit;cursor:pointer}img,svg{max-width:100%}p,h1,h2,h3,h4{margin-top:0}h1,h2,h3{letter-spacing:-.025em}p{margin-bottom:16px}a:focus-visible,button:focus-visible{outline:3px solid var(--teal);outline-offset:4px}::selection{background:#70dfd855}.shell{width:min(calc(100% - 48px),var(--max));margin-inline:auto}.skip{position:absolute;top:-120px;left:15px;z-index:500;color:#051622;background:#e1fffb;padding:12px;border-radius:6px}.skip:focus{top:15px}
+.site-header{position:sticky;top:0;z-index:100;border-bottom:1px solid #34475b7c;background:#091425ec;backdrop-filter:blur(16px)}.header-inner{height:75px;display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:flex;align-items:center;gap:13px;min-width:0}.brand-mark{display:grid;place-items:center;border:1px solid #7aeadc55;background:linear-gradient(145deg,#185166,#3e367b);border-radius:14px;width:43px;height:43px;flex:none;box-shadow:inset 0 1px #ffffff23}.brand-mark svg{width:25px;height:25px}.brand-name{font-weight:800;font-size:14px;line-height:1.3;white-space:nowrap}.brand-name small{display:block;color:var(--muted2);font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:700}.navigation{display:flex;align-items:center;gap:25px;font-size:12px;font-weight:740;color:#c5d5e4}.navigation a:hover{color:var(--teal)}.navigation .nav-github{padding:11px 15px;border-radius:10px;color:#e0faf9;background:#153247;border:1px solid #396b7d}.menu-toggle{display:none;border:1px solid #3b526c;background:#132139;border-radius:10px;color:#eff6ff;font-size:23px;line-height:1;padding:7px 11px}
+.hero{padding:91px 0 76px}.hero-grid{display:grid;grid-template-columns:minmax(0,1.03fr) minmax(0,.97fr);gap:55px;align-items:center}.eyebrow{display:inline-flex;gap:9px;align-items:center;padding:6px 14px;min-height:32px;border-radius:100px;border:1px solid #5bd9ce4a;background:#16444257;color:#b4fcf4;font-size:11px;letter-spacing:.14em;font-weight:850;text-transform:uppercase}.eyebrow:before{content:"";width:7px;height:7px;border-radius:50%;background:#75e8db;box-shadow:0 0 0 4px #56dedc16}h1{font-size:clamp(40px,5.2vw,68px);line-height:1.11;letter-spacing:-.055em;font-weight:850;margin:25px 0 22px}h1 .gradient,.gradient{background:linear-gradient(102deg,#7fe4da 0%,#9ecbff 47%,#dcb8ff 100%);-webkit-background-clip:text;background-clip:text;color:transparent}.lead{font-size:clamp(15px,1.55vw,18px);color:#bacfdf;line-height:1.85;max-width:625px}.hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin:29px 0 0}.btn{display:inline-flex;gap:9px;justify-content:center;align-items:center;padding:12px 19px;font-size:13px;font-weight:820;border-radius:10px;transition:transform .2s}.btn:hover{transform:translateY(-2px)}.btn-primary{background:linear-gradient(110deg,#83e7e2,#a7ddf8);color:#061e2c}.btn-outline{background:#13243b;border:1px solid #3b5d76;color:#e4f5ff}.tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:31px}.tags span{color:#c2d8e6;border:1px solid #2a4a62;background:#10253a;border-radius:40px;padding:5px 11px;font-size:11px;font-weight:680}
+.hero-art{position:relative;border:1px solid #35566e;background:linear-gradient(155deg,#172943,#0e1b31);border-radius:22px;padding:22px;box-shadow:0 25px 80px #01061188,inset 0 1px #ffffff18;min-width:0;overflow:hidden}.art-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:14px;border-bottom:1px solid #32485e;margin-bottom:18px}.art-head .name{font:800 11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.08em;color:#bdd3e7}.art-head .state{font:750 10px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#7fe3d8;white-space:nowrap}.pane{padding:12px 13px;border:1px solid #44627a;border-radius:12px;text-align:center;background:#172d47;color:#e8f6ff;font-size:12px;font-weight:790}.pane small{display:block;color:#a7bbcd;font-size:10px;font-weight:520}.pane.accent{background:linear-gradient(120deg,#204b56,#283a5a);border-color:#5b9f9c}.pane.result{background:linear-gradient(110deg,#302b56,#1a3654);border-color:#7476a9}.arrow{line-height:1.3;text-align:center;color:#80e1dd;font-size:19px;font-weight:800;padding:7px 0}.workers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.workers .pane{min-width:0}.art-track{text-align:center;color:#96c8d3;font:800 10px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.07em;padding:9px 0 3px}.art-footer{border-top:1px solid #365069;margin-top:15px;padding-top:13px;display:flex;align-items:center;justify-content:space-between;gap:10px;font:720 10px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#a9c5d9}.art-footer strong{color:#c6b9ff}
+.metrics{background:#0b182a;border-block:1px solid #243850}.metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}.metric{padding:24px 23px;border-right:1px solid #263b52}.metric:first-child{padding-left:0}.metric:last-child{border:0}.metric b{display:block;font-size:27px;line-height:1.25;color:#ebfcff;letter-spacing:-.055em}.metric span{display:block;font-size:12px;color:#8ea8be;margin-top:6px}
+.section{padding:88px 0}.section-alt{background:linear-gradient(180deg,#0b182b,#0a1629)}.section-heading{max-width:775px;margin-bottom:31px}.kicker{font-weight:850;font-size:11px;letter-spacing:.15em;color:#88dcd9;text-transform:uppercase;margin-bottom:10px}.section-title{font-size:clamp(31px,3.5vw,46px);line-height:1.2;letter-spacing:-.042em;margin-bottom:13px}.section-description{color:#aebfd1;font-size:15px;line-height:1.85}.feature-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.feature{min-width:0;border:1px solid #2c425c;border-radius:16px;background:linear-gradient(154deg,#14253d,#0e1c30);padding:23px 23px 21px;min-height:209px}.feature .fnumber{display:inline-grid;place-items:center;width:35px;height:35px;border-radius:10px;background:#1b4452;color:#99f0ea;border:1px solid #467d8b;font:850 12px ui-monospace,Consolas,monospace;margin-bottom:13px}.feature h3{font-size:16px;line-height:1.4;margin-bottom:9px}.feature p{font-size:13px;color:#adc1d2;line-height:1.78;margin-bottom:0}.feature:nth-child(3n+2) .fnumber{background:#2b2c55;color:#c5baff;border-color:#64669d}.feature:nth-child(3n) .fnumber{background:#463347;color:#ffc8de;border-color:#8b6279}
+.arch-grid{display:grid;grid-template-columns:minmax(0,1.13fr) minmax(0,.87fr);gap:22px;align-items:stretch}.architecture{background:linear-gradient(160deg,#142940,#0e1c30);border:1px solid #34516c;border-radius:20px;padding:27px;min-width:0}.diagram-top{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #35516b;padding-bottom:18px;margin-bottom:20px}.diagram-top h3{margin:0;font-size:16px}.diagram-top span{font-size:10px;letter-spacing:.08em;color:#94c6d3;font-weight:800}.diagram-stage{border:1px solid #4d7285;border-radius:12px;text-align:center;padding:14px 12px;background:#17384a;font-weight:780;font-size:13px}.diagram-stage small{font-size:11px;display:block;color:#b0c6d3;font-weight:520}.diagram-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.diagram-split .diagram-stage{background:#253458;border-color:#6d6ca5}.diagram-stage.end{background:#1e364a;border-color:#4a7793}.diagram-cue{text-align:center;padding:6px;color:#89e1e0;font-size:21px;line-height:1.3}.diagram-label{text-align:center;font:750 10px/1.5 ui-monospace,Consolas,monospace;color:#99b8c9;margin-bottom:9px}.steps{display:grid;gap:12px}.step{border:1px solid #2a415a;border-radius:15px;background:#111f34;display:flex;gap:14px;padding:17px}.step b{display:grid;place-items:center;flex:none;width:32px;height:32px;border:1px solid #477686;background:#194652;color:#a2f7f2;border-radius:10px;font-size:12px}.step h3{font-size:14px;margin-bottom:4px}.step p{margin-bottom:0;font-size:12px;line-height:1.75;color:#b4c7d6}
+.twocol{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:19px}.mode-card{border:1px solid #334c65;border-radius:17px;padding:26px;background:linear-gradient(140deg,#14263e,#101d33);min-width:0}.mode-tag{display:inline-block;border-radius:100px;border:1px solid #4b8a8e;color:#a3f6ec;padding:5px 12px;font-size:10px;letter-spacing:.09em;font-weight:900;margin-bottom:15px}.mode-tag.purple{border-color:#6861a6;color:#d2c6ff}.mode-card h3{font-size:24px;line-height:1.25;margin-bottom:12px}.mode-card p{color:#b8cad8;font-size:13px}.mode-card ul{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:11px}.mode-card li{color:#e0eaf3;font-size:13px;line-height:1.55;padding-left:21px;position:relative}.mode-card li:before{content:"✓";position:absolute;left:0;color:#77e4d8;font-weight:900}.mode-card li code{color:#9fe9ea}
+.table-frame{margin-top:20px;overflow-x:auto;max-width:100%;border:1px solid #304960;border-radius:15px;background:#101f34}.compare{border-collapse:collapse;width:100%;min-width:650px;text-align:left;font-size:13px}.compare th,.compare td{padding:15px 18px;border-bottom:1px solid #2a4059;vertical-align:top}.compare th{background:#1a304a;color:#d9f4f5;font-size:12px}.compare td{color:#c1d2df}.compare td:first-child{color:#e7f1f7;font-weight:760}.compare tr:last-child td{border-bottom:0}
+.data-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}.schema-card{min-width:0;border:1px solid #304c66;border-radius:16px;background:#102037;padding:22px}.schema-card h3{font-size:18px}.schema-card p{color:#b2c6d7;font-size:13px}.pre-wrap{min-width:0;overflow:hidden;border:1px solid #2d455e;border-radius:12px;background:#071321}.code-top{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid #263e55;background:#162a42;color:#bfdbef;font:790 11px/1.5 ui-monospace,Consolas,monospace}.copy{border:1px solid #45657d;background:#213c55;color:#e1f7ff;padding:5px 10px;border-radius:7px;font-size:11px;font-weight:800;flex:none}.copy:hover{background:#2d5870}pre{max-width:100%;width:100%;overflow-x:auto;margin:0;padding:16px 17px;color:#b3e8e3;font:12px/1.8 ui-monospace,SFMono-Regular,Consolas,Monaco,monospace;tab-size:2;white-space:pre;scrollbar-width:thin}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}p code,li code{font-size:.91em;color:#9ee9e3;overflow-wrap:anywhere}
+.dev-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:22px}.command-stack{display:grid;gap:15px;min-width:0}.aside-stack{display:grid;gap:14px;align-content:start;min-width:0}.note-card{border:1px solid #30475d;border-radius:15px;background:#122139;padding:21px}.note-card h3{font-size:15px;margin-bottom:10px}.note-card p{font-size:13px;color:#b2c4d3;margin-bottom:9px}.note-card a{font-weight:730;color:#8ee4e5}.callout{border-left:3px solid #80e5de;background:#11334252;padding:18px 21px;color:#d2e4ec;border-radius:0 10px 10px 0;margin-top:22px;font-size:13px;line-height:1.9}
+.source-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:21px}.files,.source-aside{border-radius:17px;border:1px solid #30485f;background:#112139;padding:25px;min-width:0}.files h3,.source-aside h3{font-size:18px;margin-bottom:18px}.files ul{padding:0;margin:0;list-style:none}.files li{border-top:1px solid #2d4156}.files li:last-child{border-bottom:1px solid #2d4156}.files li a{display:flex;justify-content:space-between;gap:11px;align-items:center;padding:13px 0}.files li a:hover .file-name{color:#86e9e0}.file-name{font-size:12px;font-weight:800;color:#e7f4ff;overflow-wrap:anywhere}.file-desc{font-size:11px;line-height:1.5;color:#8fa7bc;text-align:right;max-width:43%}.source-aside p{font-size:13px;color:#b5c8d7}.source-buttons{display:flex;flex-wrap:wrap;gap:9px;margin-top:22px}.source-buttons a{border:1px solid #426079;padding:8px 12px;font-size:12px;font-weight:750;border-radius:9px;color:#d1eeed}.source-buttons a:hover{background:#153b46}.final-note{margin-top:26px;padding:21px 23px;border:1px solid #385973;border-radius:14px;background:#132740}.final-note strong{display:block;margin-bottom:5px;color:#c3fcf4}.final-note p{font-size:13px;color:#b9cdde;margin-bottom:0}.footer{padding:29px 0;background:#071222;border-top:1px solid #273a52}.footer-inner{display:flex;align-items:center;justify-content:space-between;gap:15px}.footer-inner span{font-size:12px;color:#96aec2}.footer-links{display:flex;gap:19px;flex-wrap:wrap}.footer-links a{font-size:12px;color:#c0d8e6}.footer-links a:hover{color:#87eee3}
+@media(max-width:1020px){.hero-grid{gap:30px}.feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.navigation{gap:15px}.brand-name{font-size:13px}.arch-grid,.dev-grid{grid-template-columns:1fr}.hero{padding-top:65px}.hero-art{padding:18px}}
+@media(max-width:760px){.header-inner{height:69px}.menu-toggle{display:block}.navigation{display:none;position:absolute;left:0;right:0;top:69px;padding:17px 24px 24px;background:#0b192ddc;border-bottom:1px solid #31516c;flex-direction:column;align-items:stretch;gap:16px;box-shadow:0 20px 30px #02071680}.navigation.open{display:flex}.navigation a{padding:6px 3px}.navigation .nav-github{text-align:center;padding:12px}.hero-grid,.twocol,.data-grid,.source-grid{grid-template-columns:1fr}.hero{padding:54px 0 62px}.hero-art{max-width:560px;width:100%;margin:0 auto}.metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metric{border-bottom:1px solid #263b52;padding:18px 16px}.metric:first-child{padding-left:16px}.metric:nth-child(even){border-right:0}.metric:nth-last-child(-n+2){border-bottom:0}.section{padding:65px 0}.feature-grid{gap:12px}.footer-inner{align-items:flex-start;flex-direction:column}}
+@media(max-width:520px){.shell{width:min(calc(100% - 32px),var(--max))}.brand-name{font-size:11px;white-space:normal}.brand-name small{font-size:9px}.brand-mark{width:39px;height:39px}.hero h1{font-size:clamp(35px,9vw,46px)}.lead{font-size:14px}.hero-actions{display:grid;grid-template-columns:1fr}.feature-grid{grid-template-columns:1fr}.feature{min-height:auto}.hero-art{padding:15px;border-radius:17px}.workers,.diagram-split{gap:8px}.pane,.diagram-stage{padding:11px 7px;font-size:11px}.pane small,.diagram-stage small{font-size:9px}.art-head .name,.art-head .state{font-size:9px}.metrics-grid .metric b{font-size:22px}.metric span{font-size:11px}.section-title{font-size:clamp(29px,8vw,36px)}.architecture,.files,.source-aside,.mode-card,.schema-card{padding:19px}.feature{padding:21px}.file-desc{display:none}.files li a{justify-content:flex-start}.art-footer{flex-direction:column;align-items:flex-start}.code-top{font-size:10px}pre{padding:13px;font-size:11px}.step{padding:14px}.note-card{padding:18px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn{transition:none}}
+</style>
 </head>
-
-<body>
-  <header>
-    <h1>Parallel LLM Inference with PyTorch</h1>
-
-    <p>
-      An educational AI engineering project
-      demonstrating parallel batch inference,
-      multi-process worker orchestration,
-      and sentiment classification using Qwen2.5.
-    </p>
-  </header>
-
-  <main>
-    <h2>Project Features</h2>
-    <ul>
-      <li>Parallel LLM batch inference</li>
-      <li>Qwen2.5-0.5B-Instruct model</li>
-      <li>PyTorch and Hugging Face Transformers</li>
-      <li>Python multiprocessing worker pool</li>
-      <li>Single-GPU and multi-GPU inference</li>
-      <li>Independent model replica per GPU</li>
-      <li>Shared task queue and result queue</li>
-      <li>Dynamic mini-batch processing</li>
-      <li>Length-sorted batches to reduce padding</li>
-      <li>Input and output JSONL validation</li>
-      <li>Product review sentiment classification</li>
-      <li>Stable output ordering</li>
-      <li>Inference performance measurements</li>
-      <li>Offline mock testing with CPU workers</li>
-      <li>Jupyter, Colab and Kaggle examples</li>
-    </ul>
-
-    <h2>System Architecture</h2>
-    <p>
-      Input JSONL records are validated by a
-      parent process and distributed through a
-      shared task queue to independent inference
-      workers. Each worker processes batches
-      using its assigned device. Results return
-      to the parent process, which restores
-      original input order.
-    </p>
-
-    <h2>Multi-GPU Inference</h2>
-    <p>
-      Each GPU loads a separate complete model
-      replica. This is data-parallel inference,
-      not DistributedDataParallel training or
-      tensor/model parallelism. GPU memory
-      is not combined across devices.
-    </p>
-
-    <h2>Qwen2.5 Sentiment Classification</h2>
-    <p>
-      The project demonstrates product-review
-      sentiment classification using
-      Qwen2.5-0.5B-Instruct with configurable
-      batch sizes, input token limits and
-      output generation settings.
-    </p>
-
-    <h2>Testing and Limitations</h2>
-    <p>
-      Offline mock testing validates queue
-      processing and file handling without
-      running an LLM. Real inference requires
-      compatible hardware and model weights.
-      Performance improvements are not guaranteed.
-    </p>
-
-    <h2>Source Code</h2>
-    <p>
-      <a href="https://github.com/su394611-del/Parallel-LLM-Inference">
-        View Parallel LLM Inference Repository
-      </a>
-    </p>
-
-    <h2>Technical Documentation</h2>
-    <p>
-      <a href="https://github.com/su394611-del/Parallel-LLM-Inference/wiki">
-        View GitHub Wiki and Architecture Documentation
-      </a>
-    </p>
-  </main>
+<body id="top">
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><div class="shell header-inner">
+<a class="brand" href="#top" aria-label="Parallel LLM Inference home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M5 8h8l4 8-4 8H5l4-8-4-8Zm14 0h8v16h-8" stroke="#a6fff5" stroke-width="2.5" stroke-linejoin="round"/><path d="M21 12h4m-4 8h4" stroke="#a7b9ff" stroke-width="2"/></svg></span><span class="brand-name">Parallel LLM Inference<small>PyTorch · Qwen2.5 · Multi-GPU</small></span></a>
+<button type="button" id="menu-toggle" class="menu-toggle" aria-label="Open navigation menu" aria-expanded="false" aria-controls="site-nav">☰</button>
+<nav id="site-nav" class="navigation" aria-label="Primary navigation"><a href="#capabilities">Capabilities</a><a href="#architecture">Architecture</a><a href="#modes">Inference modes</a><a href="#implementation">Run locally</a><a class="nav-github" href="https://github.com/su394611-del/Parallel-LLM-Inference" target="_blank" rel="noopener noreferrer">GitHub source ↗</a></nav>
+</div></header>
+<main id="main">
+<section class="hero" aria-labelledby="hero-title"><div class="shell hero-grid"><div>
+<span class="eyebrow">LLM systems · parallel inference</span>
+<h1 id="hero-title">Parallel LLM inference.<br><span class="gradient">Independent workers. Ordered results.</span></h1>
+<p class="lead">A professional-grade Python inference workflow built around <strong>PyTorch</strong>, <strong>Qwen2.5-0.5B-Instruct</strong> and <strong>Hugging Face Transformers</strong>. Distribute JSONL review-classification batches across independent CPU or GPU workers, track execution and restore every result to its original input position.</p>
+<div class="hero-actions"><a class="btn btn-primary" href="#architecture">Explore architecture <span aria-hidden="true">→</span></a><a class="btn btn-outline" href="https://github.com/su394611-del/Parallel-LLM-Inference" target="_blank" rel="noopener noreferrer">View source on GitHub ↗</a></div>
+<div class="tags" aria-label="Core technologies"><span>Python multiprocessing</span><span>Qwen2.5 0.5B</span><span>JSONL pipeline</span><span>CUDA workers</span><span>Hugging Face</span></div>
+</div><div class="hero-art" aria-label="Illustration of the parallel inference data flow" role="img">
+<div class="art-head"><span class="name">INFERENCE ORCHESTRATOR / FLOW</span><span class="state">● BATCH PIPELINE</span></div>
+<div class="pane accent">reviews.jsonl <small>Validated records · indexed input</small></div><div class="arrow">↓</div>
+<div class="pane">Parent process <small>Length-aware batching · task queue</small></div><div class="arrow">↙ &nbsp;&nbsp;&nbsp; ↘</div>
+<div class="workers"><div class="pane">Worker 0 <small>cuda:0 · model replica A</small></div><div class="pane">Worker 1 <small>cuda:1 · model replica B</small></div></div>
+<div class="art-track">INDEPENDENT GENERATION / SHARED RESULT QUEUE</div><div class="arrow">↓</div>
+<div class="pane result">results.jsonl <small>Stable ordering · normalized labels</small></div>
+<div class="art-footer"><span>MODE: QWEN / CPU MOCK</span><strong>NO MODEL SHARDING</strong></div>
+</div></div></section>
+<div class="metrics"><div class="shell metrics-grid"><div class="metric"><b>0.5B</b><span>Qwen2.5 model family</span></div><div class="metric"><b>48</b><span>Sample records in reviews.jsonl</span></div><div class="metric"><b>1 / device</b><span>Independent model replica</span></div><div class="metric"><b>JSONL</b><span>Input and ordered output</span></div></div></div>
+<section id="capabilities" class="section"><div class="shell"><div class="section-heading"><div class="kicker">Engineering capabilities</div><h2 class="section-title">A complete batch-processing path, from input to output.</h2><p class="section-description">The checked-in Python implementation covers orchestration, device-aware generation, record validation and run instrumentation. These capabilities are available as a standalone CLI with a companion Jupyter notebook.</p></div>
+<div class="feature-grid">
+<article class="feature"><span class="fnumber">01</span><h3>Process-based concurrency</h3><p>Launch isolated Python workers with the <code>spawn</code> context and route batches through a bounded shared task queue.</p></article>
+<article class="feature"><span class="fnumber">02</span><h3>Qwen2.5 inference</h3><p>Load <code>Qwen/Qwen2.5-0.5B-Instruct</code> using Transformers, with chat-template prompts and greedy text generation.</p></article>
+<article class="feature"><span class="fnumber">03</span><h3>Device-level replicas</h3><p>Assign one full model replica per selected CUDA GPU. CPU inference and an offline heuristic mode are also supported.</p></article>
+<article class="feature"><span class="fnumber">04</span><h3>Dynamic task distribution</h3><p>Workers consume available batches as they become ready, using a common producer queue rather than fixed file partitions.</p></article>
+<article class="feature"><span class="fnumber">05</span><h3>Length-aware batching</h3><p>Group reviews by approximate text length before tokenization to reduce unnecessary padding in each mini-batch.</p></article>
+<article class="feature"><span class="fnumber">06</span><h3>Strict JSONL intake</h3><p>Validate each input object, required text field and nonempty review before scheduling inference work.</p></article>
+<article class="feature"><span class="fnumber">07</span><h3>Deterministic ordering</h3><p>Track original row indices across asynchronous workers, then write completed predictions in input order.</p></article>
+<article class="feature"><span class="fnumber">08</span><h3>Normalized sentiment</h3><p>Preserve the raw generated output and separately parse positive or negative labels, leaving unrecognized outputs null.</p></article>
+<article class="feature"><span class="fnumber">09</span><h3>Execution instrumentation</h3><p>Report model loading time, inference time, rows per second, output tokens per second and per-worker records.</p></article>
+<article class="feature"><span class="fnumber">10</span><h3>Timeout and failure handling</h3><p>Check worker exit codes, reject duplicate responses, enforce timeouts and terminate remaining processes on failure.</p></article>
+<article class="feature"><span class="fnumber">11</span><h3>Offline pipeline testing</h3><p>Run multiple CPU workers without downloading a model to exercise queue distribution and file processing.</p></article>
+<article class="feature"><span class="fnumber">12</span><h3>Notebook integration</h3><p>Use the self-contained Colab/Kaggle notebook, which launches the multiprocessing CLI through subprocesses.</p></article>
+</div></div></section>
+<section id="architecture" class="section section-alt"><div class="shell"><div class="section-heading"><div class="kicker">System architecture</div><h2 class="section-title">Parallelism at the worker boundary.</h2><p class="section-description">The parent process owns validation, scheduling and result assembly. Each worker owns model initialization and batch generation on its assigned device. All model replicas remain independent.</p></div>
+<div class="arch-grid"><div class="architecture"><div class="diagram-top"><h3>Batch inference execution graph</h3><span>INDEPENDENT WORKERS</span></div>
+<div class="diagram-stage">JSONL input or generated sample records <small>Input schema and text validation</small></div><div class="diagram-cue">↓</div>
+<div class="diagram-stage">Parent coordinator <small>Sort indices by text length · create mini-batches</small></div><div class="diagram-cue">↓</div>
+<div class="diagram-stage">Shared task queue <small>Batch IDs + original row indices</small></div><div class="diagram-cue">↙ &nbsp;&nbsp; ↘</div>
+<div class="diagram-split"><div class="diagram-stage">Worker 0 · GPU 0 <small>Full Qwen model copy · generate()</small></div><div class="diagram-stage">Worker 1 · GPU 1 <small>Full Qwen model copy · generate()</small></div></div>
+<div class="diagram-cue">↘ &nbsp;&nbsp; ↙</div><div class="diagram-stage">Shared results queue <small>Predictions + token counts + worker ID</small></div><div class="diagram-cue">↓</div>
+<div class="diagram-stage end">Ordered JSONL output <small>Restore row order · add parsed sentiment</small></div>
+<div class="diagram-label">CPU MOCK USES THE SAME WORKER / QUEUE STRUCTURE</div></div>
+<div class="steps">
+<div class="step"><b>01</b><div><h3>Read and validate</h3><p>Load review records from JSONL, or generate synthetic examples. Reject invalid or empty review text.</p></div></div>
+<div class="step"><b>02</b><div><h3>Schedule by batch</h3><p>Sort original row indices by review length and place groups into a queue, retaining the record-to-index mapping.</p></div></div>
+<div class="step"><b>03</b><div><h3>Initialize workers</h3><p>Spawn processes with a device assignment. Model loading is serialized to reduce simultaneous memory and download spikes.</p></div></div>
+<div class="step"><b>04</b><div><h3>Generate and collect</h3><p>Each worker produces a classification string and returns its batch output. The coordinator validates batch completeness.</p></div></div>
+<div class="step"><b>05</b><div><h3>Reassemble and measure</h3><p>Write outputs in the original order and report throughput, initialization timing and worker-level counts.</p></div></div>
+</div></div><div class="callout"><strong>Parallelism model:</strong> This is independent-worker, data-parallel <em>inference</em>—not <code>DistributedDataParallel</code> training, tensor parallelism, or pooled GPU memory. Every selected GPU must fit the complete model and its inference buffers.</div></div></section>
+<section id="modes" class="section"><div class="shell"><div class="section-heading"><div class="kicker">Execution strategies</div><h2 class="section-title">One orchestration engine. Two practical execution paths.</h2><p class="section-description">Start with the offline process test to verify the data path, then select real Qwen inference when the model weights and supported hardware are available.</p></div>
+<div class="twocol"><article class="mode-card"><span class="mode-tag">MODE A · OFFLINE PIPELINE</span><h3>CPU mock workers</h3><p>Runs the actual multiprocessing and JSONL workflow with a deterministic keyword-based sentiment heuristic. It does not initialize an LLM and is suitable for validating orchestration independently of model downloads.</p><ul><li>Two or more <code>cpu</code> worker slots</li><li>Queueing, batching and stable output ordering</li><li>Input/output JSONL validation</li><li>Not an LLM-quality or model-speed benchmark</li></ul></article>
+<article class="mode-card"><span class="mode-tag purple">MODE B · PRETRAINED MODEL</span><h3>Qwen2.5 generation</h3><p>Loads Qwen2.5-0.5B-Instruct as a causal language model on each selected device. A constrained prompt requests a single sentiment label; output is normalized only if it matches the expected format.</p><ul><li>Single CUDA GPU or independent multi-GPU workers</li><li>Chat templates, left-padding and greedy decoding</li><li>Configurable batch and token limits</li><li>Separate load and inference timing</li></ul></article></div>
+<div class="table-frame" role="region" aria-label="Inference configuration comparison" tabindex="0"><table class="compare"><thead><tr><th scope="col">Property</th><th scope="col">CPU mock</th><th scope="col">Qwen inference</th></tr></thead><tbody>
+<tr><td>Model loaded</td><td>No; deterministic heuristic</td><td>Qwen2.5-0.5B-Instruct per device</td></tr>
+<tr><td>Devices</td><td><code>cpu cpu</code>, etc.</td><td><code>cuda:0</code>, <code>cuda:0 cuda:1</code>, or CPU</td></tr>
+<tr><td>Batch size default</td><td>2</td><td>2 (often reduce to 1 on limited VRAM)</td></tr>
+<tr><td>Max input tokens</td><td>Not used by heuristic</td><td>256 default; configurable</td></tr>
+<tr><td>Max new tokens</td><td>Not used by heuristic</td><td>8 default; configurable</td></tr>
+<tr><td>Prediction output</td><td>Positive / negative heuristic</td><td>Decoded LLM text with strict label normalization</td></tr>
+<tr><td>Validation purpose</td><td>Queue and file handling</td><td>Model inference behavior on selected runtime</td></tr>
+</tbody></table></div>
+</div></section>
+<section id="data" class="section section-alt"><div class="shell"><div class="section-heading"><div class="kicker">Data engineering</div><h2 class="section-title">A predictable contract for batch sentiment inference.</h2><p class="section-description">Each input row must be a JSON object containing a nonempty <code>review</code> string, unless another field is selected with <code>--text-field</code>. Existing metadata travels through the pipeline unchanged.</p></div>
+<div class="data-grid"><article class="schema-card"><h3>Input · reviews.jsonl</h3><p>The repository includes 48 synthetic, labeled product-review rows. Labels are optional; when provided, they can be used for a simple accuracy calculation.</p><div class="pre-wrap"><div class="code-top"><span>JSONL / INPUT</span><button class="copy" type="button" aria-label="Copy JSONL input example">Copy</button></div><pre><code>{"id":"R001","product":"smartphone","review":"The display is excellent and works perfectly.","label":"positive"}
+{"id":"R002","product":"SSD","review":"The product stopped working.","label":"negative"}</code></pre></div></article>
+<article class="schema-card"><h3>Output · results.jsonl</h3><p>Every record retains its original fields and adds the model's raw <code>llm_output</code> and a strictly normalized <code>predicted_label</code>. An unexpected response produces <code>null</code> for that label.</p><div class="pre-wrap"><div class="code-top"><span>JSONL / OUTPUT SHAPE</span><button class="copy" type="button" aria-label="Copy JSONL output example">Copy</button></div><pre><code>{"id":"R001","review":"The display is excellent.","label":"positive","llm_output":"positive","predicted_label":"positive"}
+{"id":"R002","review":"The product stopped working.","label":"negative","llm_output":"negative","predicted_label":"negative"}</code></pre></div></article></div>
+<div class="callout"><strong>Output semantics:</strong> The JSONL examples above illustrate the file contract, not recorded results from a GPU benchmark. In the implementation, <code>predicted_label</code> is <code>null</code> if the generated response is not a recognized one-word sentiment label.</div>
+</div></section>
+<section id="implementation" class="section"><div class="shell"><div class="section-heading"><div class="kicker">Developer workflow</div><h2 class="section-title">Clone, validate and run from a single CLI.</h2><p class="section-description">Commands below use filenames verified in the current GitHub repository. The project works as a standalone Python script; the notebook launches that script in subprocesses to accommodate multiprocessing.</p></div>
+<div class="dev-grid"><div class="command-stack">
+<div class="pre-wrap"><div class="code-top"><span>01 · Clone repository / Windows PowerShell</span><button class="copy" type="button" aria-label="Copy repository clone and virtual environment commands">Copy</button></div><pre><code>git clone https://github.com/su394611-del/Parallel-LLM-Inference.git
+cd Parallel-LLM-Inference
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt</code></pre></div>
+<div class="pre-wrap"><div class="code-top"><span>02 · Offline 2-worker pipeline verification</span><button class="copy" type="button" aria-label="Copy offline mock inference command">Copy</button></div><pre><code>.\.venv\Scripts\python.exe parallel_llm_inference.py --mock --devices cpu cpu --input reviews.jsonl --output results_mock.jsonl --batch-size 4</code></pre></div>
+<div class="pre-wrap"><div class="code-top"><span>03 · Inspect CUDA availability</span><button class="copy" type="button" aria-label="Copy GPU availability command">Copy</button></div><pre><code>.\.venv\Scripts\python.exe -c "import torch; print('CUDA:',torch.cuda.is_available()); print('GPU count:',torch.cuda.device_count()); print('PyTorch CUDA:',torch.version.cuda)"</code></pre></div>
+<div class="pre-wrap"><div class="code-top"><span>04 · Real inference / one CUDA GPU</span><button class="copy" type="button" aria-label="Copy single GPU inference command">Copy</button></div><pre><code>.\.venv\Scripts\python.exe parallel_llm_inference.py --devices cuda:0 --input reviews.jsonl --output results_gpu.jsonl --batch-size 1 --max-input-tokens 192 --max-new-tokens 8</code></pre></div>
+<div class="pre-wrap"><div class="code-top"><span>05 · Real inference / two CUDA GPUs</span><button class="copy" type="button" aria-label="Copy two GPU inference command">Copy</button></div><pre><code>.\.venv\Scripts\python.exe parallel_llm_inference.py --devices cuda:0 cuda:1 --input reviews.jsonl --output results_2gpu.jsonl --batch-size 2 --max-input-tokens 192 --max-new-tokens 8</code></pre></div>
+</div><aside class="aside-stack">
+<div class="note-card"><h3>CUDA installation</h3><p>A compatible CUDA-enabled PyTorch build is required for NVIDIA acceleration. A GPU visible to <code>nvidia-smi</code> does not guarantee that the active PyTorch environment can use CUDA.</p><a href="https://pytorch.org/get-started/locally/" target="_blank" rel="noopener noreferrer">Official PyTorch installer ↗</a></div>
+<div class="note-card"><h3>Model replica sizing</h3><p>Each selected GPU loads the full Qwen model. Start with <code>--batch-size 1</code> and smaller token limits on limited VRAM. Duplicating the same CUDA device in the worker list is rejected by the CLI.</p></div>
+<div class="note-card"><h3>Jupyter and Kaggle</h3><p>Open <code>Parallel_LLM_Inference_Colab_Kaggle.ipynb</code> for a self-contained workflow. Its default path runs the offline mock; Qwen inference must be opted into separately.</p></div>
+<div class="note-card"><h3>Measured fields</h3><p>After the run, the script prints model load time, inference duration, row throughput, approximate output-token throughput, per-worker counts and optional labeled-row accuracy.</p></div>
+</aside></div>
+<div class="final-note"><strong>Execution evidence and scope</strong><p>The code implements queue-based multiprocessing, offline mock processing and a Qwen inference path. Mock results do not establish actual LLM accuracy or GPU scaling, and no measured two-GPU speedup is claimed. This project is a batch CLI workflow, not a persistent HTTP serving system or model-parallel inference engine.</p></div>
+</div></section>
+<section id="source" class="section section-alt"><div class="shell"><div class="section-heading"><div class="kicker">Source and documentation</div><h2 class="section-title">Inspect the implementation behind the architecture.</h2><p class="section-description">Links below point to repository files verified on the current <code>legacy</code> default branch. The separate GitHub Wiki is linked as a documentation resource.</p></div>
+<div class="source-grid"><div class="files"><h3>GitHub repository files</h3><ul>
+<li><a href="https://github.com/su394611-del/Parallel-LLM-Inference/blob/legacy/README.md" target="_blank" rel="noopener noreferrer"><span class="file-name">README.md</span><span class="file-desc">Setup, architecture and execution guide ↗</span></a></li>
+<li><a href="https://github.com/su394611-del/Parallel-LLM-Inference/blob/legacy/parallel_llm_inference.py" target="_blank" rel="noopener noreferrer"><span class="file-name">parallel_llm_inference.py</span><span class="file-desc">Primary multiprocessing inference CLI ↗</span></a></li>
+<li><a href="https://github.com/su394611-del/Parallel-LLM-Inference/blob/legacy/Parallel_LLM_Inference_Colab_Kaggle.ipynb" target="_blank" rel="noopener noreferrer"><span class="file-name">Parallel_LLM_Inference_Colab_Kaggle.ipynb</span><span class="file-desc">Standalone notebook and subprocess launch ↗</span></a></li>
+<li><a href="https://github.com/su394611-del/Parallel-LLM-Inference/blob/legacy/reviews.jsonl" target="_blank" rel="noopener noreferrer"><span class="file-name">reviews.jsonl</span><span class="file-desc">48 synthetic product-review records ↗</span></a></li>
+<li><a href="https://github.com/su394611-del/Parallel-LLM-Inference/blob/legacy/requirements.txt" target="_blank" rel="noopener noreferrer"><span class="file-name">requirements.txt</span><span class="file-desc">Runtime dependency list ↗</span></a></li>
+<li><a href="https://github.com/su394611-del/Parallel-LLM-Inference/blob/legacy/License.txt" target="_blank" rel="noopener noreferrer"><span class="file-name">License.txt</span><span class="file-desc">Apache License 2.0 ↗</span></a></li>
+</ul></div><aside class="source-aside"><h3>Architecture references</h3><p><strong>Batch data flow:</strong> the coordinator validates and dispatches work; GPU workers independently generate classifications; the coordinator restores original row ordering and serializes JSONL.</p><p><strong>Dependencies:</strong> Python, PyTorch, Transformers, safetensors and tqdm. A suitable CUDA runtime and driver are needed for GPU inference.</p><p><strong>Source license:</strong> Apache License 2.0. Qwen weights have their own model license and usage terms.</p><div class="source-buttons"><a href="https://github.com/su394611-del/Parallel-LLM-Inference" target="_blank" rel="noopener noreferrer">Repository ↗</a><a href="https://github.com/su394611-del/Parallel-LLM-Inference/wiki" target="_blank" rel="noopener noreferrer">Project Wiki ↗</a><a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct" target="_blank" rel="noopener noreferrer">Qwen model ↗</a><a href="https://su394611-del.github.io/" target="_blank" rel="noopener noreferrer">AI portfolio ↗</a></div></aside></div></div></section>
+</main>
+<footer class="footer"><div class="shell footer-inner"><span>© 2026 Sudhanshu Shukla · Parallel LLM Inference · Apache-2.0 source</span><div class="footer-links"><a href="#top">Back to top ↑</a><a href="https://github.com/su394611-del/Parallel-LLM-Inference" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a href="https://github.com/su394611-del/Parallel-LLM-Inference/wiki" target="_blank" rel="noopener noreferrer">Wiki ↗</a></div></div></footer>
+<script>
+(function(){
+'use strict';
+var toggle=document.getElementById('menu-toggle');
+var nav=document.getElementById('site-nav');
+function setMenu(open){nav.classList.toggle('open',open);toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',open?'Close navigation menu':'Open navigation menu');toggle.textContent=open?'×':'☰';}
+toggle.addEventListener('click',function(){setMenu(toggle.getAttribute('aria-expanded')!=='true');});
+nav.querySelectorAll('a').forEach(function(link){link.addEventListener('click',function(){setMenu(false);});});
+document.addEventListener('keydown',function(ev){if(ev.key==='Escape')setMenu(false);});
+var copyButtons=document.querySelectorAll('button.copy');
+copyButtons.forEach(function(btn){btn.addEventListener('click',async function(){
+var code=btn.closest('.pre-wrap').querySelector('pre code');if(!code)return;
+var content=code.textContent;var copied=false;
+try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(content);copied=true;}}catch(_e){}
+if(!copied){var select=window.getSelection();var range=document.createRange();range.selectNodeContents(code);select.removeAllRanges();select.addRange(range);}
+var prior=btn.textContent;btn.textContent=copied?'Copied':'Selected';btn.setAttribute('aria-label',copied?'Copied to clipboard':'Command selected for manual copying');
+window.setTimeout(function(){btn.textContent=prior;btn.setAttribute('aria-label','Copy code');},1800);
+});});
+})();
+</script>
 </body>
 </html>
