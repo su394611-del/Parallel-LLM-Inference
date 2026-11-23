@@ -23,7 +23,7 @@ A **batch inference** project for classifying product-review sentiment using **Q
 ├── parallel_llm_inference.py       # Main, corrected Python CLI
 ├── Parallel_LLM_Inference_Colab_Kaggle.ipynb
 ├── reviews.jsonl                   # Synthetic, labeled input records
-├── parallel_llm_inference_corrected_kaggle.py
+├── parallel_llm_inference_corrected_kaggle.py  # Compatibility name for the same CLI
 ├── parallel_llm_inference_fix.py
 ├── parallel_llm_inference_colab.ipynb
 ├── requirements-notebook.txt
