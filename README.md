@@ -1,8 +1,8 @@
 # Parallel LLM Inference with PyTorch, Hugging Face, and Multi-GPU Workers
 
-An  **batch inference** project for classifying product-review sentiment using **Qwen2.5-0.5B-Instruct** and a multiprocessing worker pool. Each worker loads a **separate model replica** on its assigned GPU. Workers pull batches from a shared queue; the parent restores input order and writes predictions to JSONL.
+A **batch inference** project for classifying product-review sentiment using **Qwen2.5-0.5B-Instruct** and a multiprocessing worker pool. Each worker loads a **separate model replica** on its assigned GPU. Workers pull batches from a shared queue; the parent restores input order and writes predictions to JSONL.
 
-> **Scope:** This is parallel **inference**, not DDP training,.This also implements model/tensor parallelism, or an HTTP-serving API. Each GPU must have enough VRAM for the entire model and its generation buffers. The included `--mock` backend is a deterministic keyword heuristic.
+> **Scope:** This is parallel **inference**, not DDP training, model/tensor parallelism, or an HTTP-serving API. Each GPU must have enough VRAM for the entire model and its generation buffers. The included `--mock` backend is a deterministic keyword heuristic.
 
 ## Features
 
@@ -22,15 +22,16 @@ An  **batch inference** project for classifying product-review sentiment using *
 ├── requirements.txt
 ├── parallel_llm_inference.py       # Main, corrected Python CLI
 ├── Parallel_LLM_Inference_Colab_Kaggle.ipynb
-├── reviews.jsonl                   # 48 synthetic, labeled input records
-├── .gitignore
-└── legacy/                         # Uploaded earlier variants, for reference
-    ├── parallel_llm_inference_corrected_kaggle_original.py
-    ├── parallel_llm_inference_fix_original.py
-    └── parallel_llm_inference_colab_original.ipynb
+├── reviews.jsonl                   # Synthetic, labeled input records
+├── parallel_llm_inference_corrected_kaggle.py
+├── parallel_llm_inference_fix.py
+├── parallel_llm_inference_colab.ipynb
+├── requirements-notebook.txt
+├── Parallel_llm_inference_requirements.txt  # Historical upload; not a pip requirements file
+└── docs/                            # GitHub Pages site and sitemap
 ```
 
-**Recommended entry point:** `parallel_llm_inference.py`. The reference files in `legacy/` are not used by the instructions below. The previously supplied file `Parallel_llm_inference_requirements.txt` contained program text, not installable requirements, and is deliberately not treated as a dependency list.
+**Recommended entry point:** `parallel_llm_inference.py`. The additional reference scripts and notebook are stored at the repository root and are not required for the instructions below. The previously supplied file `Parallel_llm_inference_requirements.txt` contained program text, not installable requirements, and is deliberately not treated as a dependency list.
 
 ## Requirements
 
