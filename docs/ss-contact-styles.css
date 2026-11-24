@@ -1,0 +1,15 @@
+/* Contact section: the Formspree form lives at https://su394611-del.github.io/contact.html and is embedded via iframe. */
+.ss-contact{padding:clamp(56px,7vw,96px) 0;scroll-margin-top:88px}
+.ss-contact-inner{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:clamp(32px,5vw,64px);align-items:start;padding-top:clamp(40px,5vw,64px);border-top:1px solid rgba(120,160,200,.18)}
+.ss-contact-copy .ss-contact-kicker{margin:0 0 12px;font-size:11px;font-weight:850;letter-spacing:.16em;text-transform:uppercase;color:var(--cyan,var(--aqua,var(--teal,var(--mint,#7be2f0))))}
+.ss-contact h2{margin:0 0 14px;font-size:clamp(28px,3.2vw,42px);line-height:1.15;letter-spacing:-.04em;font-weight:820}
+.ss-contact-grad{background:linear-gradient(90deg,#7be2f0,#b3a9ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.ss-contact-copy p{margin:0;color:var(--muted,#aabed5);line-height:1.7}
+.ss-contact-copy p.ss-contact-more{margin-top:16px;font-size:14px}
+.ss-contact-more a{color:var(--cyan,var(--aqua,var(--teal,var(--mint,#7be2f0))));text-decoration:none}
+.ss-contact-more a:hover,.ss-contact-more a:focus-visible{text-decoration:underline;text-underline-offset:3px}
+.ss-contact-frame{display:block;width:100%;height:560px;border:0;background:transparent;color-scheme:dark;transition:height .2s ease}
+.ss-contact-fallback{margin:10px 2px 0;font-size:12px;color:var(--muted,#aabed5);opacity:.85}
+.ss-contact-fallback a{color:inherit}
+@media (max-width:880px){.ss-contact-inner{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.ss-contact-frame{transition:none}}

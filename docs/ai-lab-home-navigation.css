@@ -1,0 +1,8 @@
+/* Shared return-to-home control, styled after MedSparse Healthcare. */
+.ai-lab-return-zone{box-sizing:border-box;width:min(calc(100% - 40px),1180px);margin:14px auto 0;display:flex;justify-content:flex-end;align-items:center;position:relative;z-index:1}
+.ai-lab-home-pill{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:10px 16px 10px 13px;border:1px solid #3c5975;border-radius:999px;background:#122338;color:#eef5ff!important;font:800 13px/1.2 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.01em;text-decoration:none!important;white-space:nowrap;touch-action:manipulation;transition:border-color .15s,background-color .15s}
+.ai-lab-home-pill:hover{border-color:#7be2f0;background:#163049;color:#eef5ff!important}
+.ai-lab-home-pill:focus-visible{outline:3px solid #95eaff;outline-offset:3px}
+.ai-lab-home-pill svg{display:block;flex:none;width:18px;height:18px;max-width:none;color:#7be2f0}
+@media(max-width:600px){.ai-lab-return-zone{width:calc(100% - 32px);margin:12px auto 0;justify-content:flex-start}.ai-lab-home-pill{min-height:44px;padding:10px 14px;font-size:13px}}
+@media(prefers-reduced-motion:reduce){.ai-lab-home-pill{transition:none}}

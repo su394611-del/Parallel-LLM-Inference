@@ -1,0 +1,2 @@
+/* Resize the contact iframe to fit the form; /contact.html posts its height. */
+(function(){window.addEventListener('message',function(e){if(e.origin!==window.location.origin)return;var d=e.data;if(!d||d.type!=='contact-frame:height')return;var f=document.getElementById('ss-contact-frame');if(!f||e.source!==f.contentWindow)return;var h=Math.ceil(Number(d.height));if(h>0&&h<4000)f.style.height=h+'px';});})();
